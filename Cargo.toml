@@ -2,5 +2,59 @@
 name = "min_hook_rs"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
-[dependencies]
+[dependencies.windows-sys]
+version = "0.60"
+features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Environment",
+    "Win32_System_Memory", 
+    "Win32_System_Kernel",
+    "Win32_System_SystemInformation",
+    "Win32_System_SystemServices",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_System_Console",
+    "Win32_Security"
+]
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dependencies.serde_json]
+version = "1.0"
+
+[[example]]
+name = "basic_hook"
+path = "examples/basic_hook.rs"
+
+# B服原神Hook DLL
+[[example]]
+name = "genshin_bili_dll"
+path = "examples/genshin_bili_dll.rs"
+crate-type = ["cdylib"]
+
+# B服原神注入器
+[[example]]
+name = "genshin_bili_injector"
+path = "examples/genshin_bili_injector.rs"
+
+# FPS解锁器
+[[example]]
+name = "genshin_fps_unlocker"
+path = "examples/genshin_fps_unlocker.rs"
+
+[profile.release]
+lto = true
+opt-level = "z"
+panic = "abort"
+
+# 库配置
+[lib]
+name = "min_hook_rs"
+crate-type = ["rlib"]
