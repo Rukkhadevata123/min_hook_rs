@@ -10,6 +10,7 @@ use std::ffi::c_void;
 
 /// 8-bit relative jump instruction
 #[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
 pub struct JmpRelShort {
     /// Opcode: EB xx (JMP +2+xx)
     pub opcode: u8,
@@ -19,6 +20,7 @@ pub struct JmpRelShort {
 
 /// 32-bit relative jump/call instruction
 #[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
 pub struct JmpRel {
     /// Opcode: E9 (JMP) or E8 (CALL)
     pub opcode: u8,
@@ -28,6 +30,7 @@ pub struct JmpRel {
 
 /// 64-bit indirect absolute jump instruction
 #[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
 pub struct JmpAbs {
     /// First opcode byte: FF
     pub opcode0: u8,
@@ -41,6 +44,7 @@ pub struct JmpAbs {
 
 /// 64-bit indirect absolute call instruction
 #[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
 pub struct CallAbs {
     /// First opcode byte: FF
     pub opcode0: u8,
@@ -58,6 +62,7 @@ pub struct CallAbs {
 
 /// 32-bit relative conditional jump instruction
 #[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
 pub struct JccRel {
     /// First opcode byte: 0F
     pub opcode0: u8,
@@ -69,6 +74,7 @@ pub struct JccRel {
 
 /// 64-bit indirect absolute conditional jump
 #[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
 pub struct JccAbs {
     /// Conditional jump opcode: 7x
     pub opcode: u8,

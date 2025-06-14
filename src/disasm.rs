@@ -84,6 +84,30 @@ impl HookInstruction {
     }
 }
 
+/// Parse ModR/M addressing mode and return (displacement_size, needs_sib)
+fn parse_modrm_addressing(modrm: u8) -> (usize, bool) {
+    let mod_bits = modrm >> 6;
+    let rm = modrm & 7;
+
+    let disp_size = match mod_bits {
+        0 => {
+            if rm == 5 {
+                4
+            } else {
+                0
+            }
+        } // RIP-relative or no displacement
+        1 => 1, // 8-bit displacement
+        2 => 4, // 32-bit displacement
+        3 => 0, // Register direct
+        _ => 0, // Other
+    };
+
+    let needs_sib = mod_bits != 3 && rm == 4;
+
+    (disp_size, needs_sib)
+}
+
 /// Decode single instruction (simplified version based on original HDE64 logic)
 pub fn decode_instruction(code: &[u8]) -> HookInstruction {
     let mut inst = HookInstruction::default();
@@ -136,6 +160,50 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
 
     // Parse based on instruction type (based on actual needs from trampoline.c)
     match inst.opcode {
+        // Group 1 instructions (80-83): need ModR/M + immediate - 关键修复！
+        0x80..=0x83 => {
+            if pos >= code.len() {
+                inst.error = true;
+                return inst;
+            }
+
+            inst.modrm = code[pos];
+            pos += 1;
+
+            // Handle ModR/M addressing
+            let (disp_size, sib_needed) = parse_modrm_addressing(inst.modrm);
+
+            if sib_needed && pos < code.len() {
+                pos += 1; // Skip SIB
+            }
+
+            if code.len() < pos + disp_size {
+                inst.error = true;
+                return inst;
+            }
+
+            // Extract displacement for RIP-relative addressing
+            if (inst.modrm & 0xC7) == 0x05 && disp_size == 4 {
+                inst.displacement = read_i32(&code[pos..]).unwrap_or(0);
+            }
+
+            pos += disp_size;
+
+            // Add immediate size based on opcode
+            let imm_size = match inst.opcode {
+                0x80 | 0x82 => 1, // 8-bit immediate
+                0x81 => 4,        // 32-bit immediate
+                0x83 => 1,        // 8-bit immediate (sign-extended) - SUB RSP, 78h
+                _ => 0,
+            };
+
+            if code.len() < pos + imm_size {
+                inst.error = true;
+                return inst;
+            }
+            pos += imm_size;
+        }
+
         // Direct relative CALL/JMP
         0xE8 | 0xE9 => {
             if code.len() < pos + 4 {
@@ -287,7 +355,9 @@ fn needs_modrm(opcode: u8, opcode2: u8) -> bool {
         matches!(opcode,
             0x00..=0x03 | 0x08..=0x0B | 0x10..=0x13 | 0x18..=0x1B |
             0x20..=0x23 | 0x28..=0x2B | 0x30..=0x33 | 0x38..=0x3B |
-            0x62 | 0x63 | 0x69 | 0x6B | 0x80..=0x8D |
+            0x62 | 0x63 | 0x69 | 0x6B |
+            // 注意：0x80..=0x83 现在在上面专门处理，不在这里
+            0x88..=0x8D | // MOV, LEA 等
             0xC0 | 0xC1 | 0xC6 | 0xC7 | 0xD0..=0xD3 | 0xF6 | 0xF7 | 0xFE | 0xFF
         )
     }
@@ -303,6 +373,7 @@ fn get_immediate_size(opcode: u8, opcode2: u8) -> usize {
         // 8-bit immediate
         0x04 | 0x0C | 0x14 | 0x1C | 0x24 | 0x2C | 0x34 | 0x3C => 1,
         0xB0..=0xB7 => 1, // MOV reg8, imm8
+        // 注意：0x80..=0x83 现在在decode_instruction中专门处理
 
         // 32-bit immediate
         0x05 | 0x0D | 0x15 | 0x1D | 0x25 | 0x2D | 0x35 | 0x3D => 4,
