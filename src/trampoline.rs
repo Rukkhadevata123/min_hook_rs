@@ -39,8 +39,10 @@ fn is_code_padding(code: &[u8]) -> bool {
 /// Create a trampoline function based on original MinHook logic
 pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
     // TODO: Remove debug output - 检查输入参数
-    println!("[DEBUG] Creating trampoline for target: {:p}, detour: {:p}, buffer: {:p}", 
-             trampoline.target, trampoline.detour, trampoline.trampoline);
+    println!(
+        "[DEBUG] Creating trampoline for target: {:p}, detour: {:p}, buffer: {:p}",
+        trampoline.target, trampoline.detour, trampoline.trampoline
+    );
 
     // TODO: Remove debug output - 检查原始函数代码
     println!("[DEBUG] Original function code dump:");
@@ -98,8 +100,10 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         let new_inst_addr = trampoline.trampoline as usize + new_pos as usize;
 
         // TODO: Remove debug output - 当前指令位置
-        println!("[DEBUG] Processing instruction at old_pos: {}, new_pos: {}, old_addr: 0x{:x}, new_addr: 0x{:x}", 
-                 old_pos, new_pos, old_inst_addr, new_inst_addr);
+        println!(
+            "[DEBUG] Processing instruction at old_pos: {}, new_pos: {}, old_addr: 0x{:x}, new_addr: 0x{:x}",
+            old_pos, new_pos, old_inst_addr, new_inst_addr
+        );
 
         // Read instruction bytes
         let code_slice = unsafe { std::slice::from_raw_parts(old_inst_addr as *const u8, 16) };
@@ -119,8 +123,10 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         }
 
         // TODO: Remove debug output - 解码结果
-        println!("[DEBUG] Decoded instruction: len={}, opcode=0x{:02x}, opcode2=0x{:02x}, modrm=0x{:02x}, immediate=0x{:x}, displacement=0x{:x}", 
-                 inst.len, inst.opcode, inst.opcode2, inst.modrm, inst.immediate, inst.displacement);
+        println!(
+            "[DEBUG] Decoded instruction: len={}, opcode=0x{:02x}, opcode2=0x{:02x}, modrm=0x{:02x}, immediate=0x{:x}, displacement=0x{:x}",
+            inst.len, inst.opcode, inst.opcode2, inst.modrm, inst.immediate, inst.displacement
+        );
 
         let mut copy_size = inst.len as usize;
         let mut copy_src = old_inst_addr as *const u8;
@@ -128,8 +134,10 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         // Check if we have enough bytes for the hook
         if old_pos >= MIN_HOOK_SIZE as u8 {
             // TODO: Remove debug output - 结束trampoline
-            println!("[DEBUG] Enough bytes copied ({}), finishing trampoline with jump back to 0x{:x}", 
-                     old_pos, old_inst_addr);
+            println!(
+                "[DEBUG] Enough bytes copied ({}), finishing trampoline with jump back to 0x{:x}",
+                old_pos, old_inst_addr
+            );
 
             // Complete the trampoline with jump back to original function
             let mut final_jmp = jmp_abs;
@@ -137,7 +145,10 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
 
             // TODO: Remove debug output - 最终跳转指令
             let addr = final_jmp.address;
-            println!("[DEBUG] Final jump instruction: FF 25 00 00 00 00 {:016x}", addr);
+            println!(
+                "[DEBUG] Final jump instruction: FF 25 00 00 00 00 {:016x}",
+                addr
+            );
 
             unsafe {
                 ptr::copy_nonoverlapping(
@@ -170,11 +181,14 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
                 unsafe { inst_buf.as_mut_ptr().add(inst.len as usize - 4) as *mut u32 };
 
             let original_target = old_inst_addr + inst.len as usize + inst.displacement as usize;
-            let new_relative = (original_target as i64 - (new_inst_addr + inst.len as usize) as i64) as u32;
+            let new_relative =
+                (original_target as i64 - (new_inst_addr + inst.len as usize) as i64) as u32;
 
             // TODO: Remove debug output - RIP相对地址修正
-            println!("[DEBUG] RIP-relative fix: original_target=0x{:x}, original_disp=0x{:x}, new_disp=0x{:x}", 
-                     original_target, inst.displacement as u32, new_relative);
+            println!(
+                "[DEBUG] RIP-relative fix: original_target=0x{:x}, original_disp=0x{:x}, new_disp=0x{:x}",
+                original_target, inst.displacement as u32, new_relative
+            );
 
             unsafe {
                 *rel_addr_ptr = new_relative;
@@ -194,7 +208,10 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
             let dest = old_inst_addr + inst.len as usize + inst.immediate as usize;
 
             // TODO: Remove debug output - 相对调用
-            println!("[DEBUG] Converting relative CALL to absolute, dest=0x{:x}", dest);
+            println!(
+                "[DEBUG] Converting relative CALL to absolute, dest=0x{:x}",
+                dest
+            );
 
             let mut call = call_abs;
             call.address = dest as u64;
@@ -222,7 +239,10 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
             };
 
             // TODO: Remove debug output - 相对跳转
-            println!("[DEBUG] Processing relative JMP (0x{:02x}) to 0x{:x}", inst.opcode, dest);
+            println!(
+                "[DEBUG] Processing relative JMP (0x{:02x}) to 0x{:x}",
+                inst.opcode, dest
+            );
 
             // Simply copy internal jumps
             if (trampoline.target as usize) <= dest
@@ -254,7 +274,7 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
 
                 // Exit the function if it is not in the branch
                 finished = old_inst_addr >= jmp_dest;
-                
+
                 // TODO: Remove debug output - 是否结束
                 println!("[DEBUG] External jump, finished = {}", finished);
             }
@@ -308,7 +328,10 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
                 jcc.address = dest as u64;
 
                 // TODO: Remove debug output - 条件码反转
-                println!("[DEBUG] Condition inverted: original=0x{:x}, inverted=0x{:02x}", condition, jcc.opcode);
+                println!(
+                    "[DEBUG] Condition inverted: original=0x{:x}, inverted=0x{:02x}",
+                    condition, jcc.opcode
+                );
 
                 unsafe {
                     ptr::copy_nonoverlapping(
@@ -334,23 +357,30 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         // Can't alter the instruction length in a branch
         if old_inst_addr < jmp_dest && copy_size != inst.len as usize {
             // TODO: Remove debug output - 分支内长度冲突
-            println!("[DEBUG] ERROR: Can't alter instruction length in branch! old_addr=0x{:x}, jmp_dest=0x{:x}, copy_size={}, inst_len={}", 
-                     old_inst_addr, jmp_dest, copy_size, inst.len);
+            println!(
+                "[DEBUG] ERROR: Can't alter instruction length in branch! old_addr=0x{:x}, jmp_dest=0x{:x}, copy_size={}, inst_len={}",
+                old_inst_addr, jmp_dest, copy_size, inst.len
+            );
             return Err(HookError::UnsupportedFunction);
         }
 
         // Trampoline function is too large
         if new_pos as usize + copy_size > TRAMPOLINE_MAX_SIZE {
             // TODO: Remove debug output - Trampoline太大
-            println!("[DEBUG] ERROR: Trampoline too large! new_pos={}, copy_size={}, max_size={}", 
-                     new_pos, copy_size, TRAMPOLINE_MAX_SIZE);
+            println!(
+                "[DEBUG] ERROR: Trampoline too large! new_pos={}, copy_size={}, max_size={}",
+                new_pos, copy_size, TRAMPOLINE_MAX_SIZE
+            );
             return Err(HookError::UnsupportedFunction);
         }
 
         // Trampoline function has too many instructions
         if trampoline.n_ip >= 8 {
             // TODO: Remove debug output - 指令过多
-            println!("[DEBUG] ERROR: Too many instructions! n_ip={}", trampoline.n_ip);
+            println!(
+                "[DEBUG] ERROR: Too many instructions! n_ip={}",
+                trampoline.n_ip
+            );
             return Err(HookError::UnsupportedFunction);
         }
 
@@ -360,11 +390,19 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         trampoline.n_ip += 1;
 
         // TODO: Remove debug output - 指令边界记录
-        println!("[DEBUG] Recording boundary: old_ip[{}]={}, new_ip[{}]={}", 
-                 trampoline.n_ip - 1, old_pos, trampoline.n_ip - 1, new_pos);
+        println!(
+            "[DEBUG] Recording boundary: old_ip[{}]={}, new_ip[{}]={}",
+            trampoline.n_ip - 1,
+            old_pos,
+            trampoline.n_ip - 1,
+            new_pos
+        );
 
         // TODO: Remove debug output - 复制前的源数据
-        print!("[DEBUG] Copying {} bytes from 0x{:x}: ", copy_size, copy_src as usize);
+        print!(
+            "[DEBUG] Copying {} bytes from 0x{:x}: ",
+            copy_size, copy_src as usize
+        );
         unsafe {
             let src_slice = std::slice::from_raw_parts(copy_src, copy_size);
             for &byte in src_slice {
@@ -385,7 +423,10 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         old_pos += inst.len;
 
         // TODO: Remove debug output - 位置更新
-        println!("[DEBUG] Updated positions: old_pos={}, new_pos={}", old_pos, new_pos);
+        println!(
+            "[DEBUG] Updated positions: old_pos={}, new_pos={}",
+            old_pos, new_pos
+        );
 
         if finished {
             // TODO: Remove debug output - 循环结束
@@ -401,7 +442,10 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         let padding_slice = unsafe { std::slice::from_raw_parts(padding_addr, remaining) };
 
         // TODO: Remove debug output - 检查填充
-        println!("[DEBUG] Not enough space for hook ({}), checking padding at 0x{:x}", old_pos, padding_addr as usize);
+        println!(
+            "[DEBUG] Not enough space for hook ({}), checking padding at 0x{:x}",
+            old_pos, padding_addr as usize
+        );
         print!("[DEBUG] Padding bytes: ");
         for &byte in padding_slice {
             print!("{:02x} ", byte);
@@ -426,7 +470,10 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
             let above_addr = unsafe { (trampoline.target as *const u8).sub(MIN_HOOK_SIZE) };
 
             // TODO: Remove debug output - 检查上方空间
-            println!("[DEBUG] Checking patch above at 0x{:x}", above_addr as usize);
+            println!(
+                "[DEBUG] Checking patch above at 0x{:x}",
+                above_addr as usize
+            );
 
             if !is_executable_address(above_addr as *mut c_void) {
                 // TODO: Remove debug output - 上方不可执行
@@ -456,8 +503,10 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         unsafe { (trampoline.trampoline as *mut u8).add(new_pos as usize) as *mut c_void };
 
     // TODO: Remove debug output - Relay函数
-    println!("[DEBUG] Creating relay function at 0x{:x} pointing to detour 0x{:x}", 
-             trampoline.relay as usize, trampoline.detour as usize);
+    println!(
+        "[DEBUG] Creating relay function at 0x{:x} pointing to detour 0x{:x}",
+        trampoline.relay as usize, trampoline.detour as usize
+    );
 
     unsafe {
         ptr::copy_nonoverlapping(
@@ -470,7 +519,8 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
     // TODO: Remove debug output - 检查生成的trampoline代码
     println!("[DEBUG] Trampoline code dump:");
     unsafe {
-        let code_slice = std::slice::from_raw_parts(trampoline.trampoline as *const u8, new_pos as usize + 14);
+        let code_slice =
+            std::slice::from_raw_parts(trampoline.trampoline as *const u8, new_pos as usize + 14);
         for (i, chunk) in code_slice.chunks(16).enumerate() {
             print!("[DEBUG] {:04x}: ", i * 16);
             for &byte in chunk {
@@ -479,7 +529,7 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
             println!();
         }
     }
-    
+
     // TODO: Remove debug output - 检查relay代码
     println!("[DEBUG] Relay code dump:");
     unsafe {
@@ -501,13 +551,17 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
     print!("[DEBUG]   old_ips: [");
     for i in 0..trampoline.n_ip as usize {
         print!("{}", trampoline.old_ips[i]);
-        if i < trampoline.n_ip as usize - 1 { print!(", "); }
+        if i < trampoline.n_ip as usize - 1 {
+            print!(", ");
+        }
     }
     println!("]");
     print!("[DEBUG]   new_ips: [");
     for i in 0..trampoline.n_ip as usize {
         print!("{}", trampoline.new_ips[i]);
-        if i < trampoline.n_ip as usize - 1 { print!(", "); }
+        if i < trampoline.n_ip as usize - 1 {
+            print!(", ");
+        }
     }
     println!("]");
 
@@ -517,7 +571,10 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
 /// Allocate and create a trampoline function
 pub fn allocate_trampoline(target: *mut c_void, detour: *mut c_void) -> Result<Trampoline> {
     // TODO: Remove debug output - 分配开始
-    println!("[DEBUG] Allocating trampoline for target: {:p}, detour: {:p}", target, detour);
+    println!(
+        "[DEBUG] Allocating trampoline for target: {:p}, detour: {:p}",
+        target, detour
+    );
 
     // Allocate buffer near the target function
     let buffer = allocate_buffer(target)?;
@@ -534,7 +591,7 @@ pub fn allocate_trampoline(target: *mut c_void, detour: *mut c_void) -> Result<T
             // TODO: Remove debug output - 成功
             println!("[DEBUG] Trampoline allocation and creation successful");
             Ok(trampoline)
-        },
+        }
         Err(e) => {
             // TODO: Remove debug output - 失败
             println!("[DEBUG] Trampoline creation failed: {:?}", e);
