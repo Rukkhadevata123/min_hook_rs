@@ -110,10 +110,12 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         else if inst.is_rip_relative() {
             // Copy instruction to buffer and modify RIP-relative address
             unsafe {
-                // Avoid using memcpy to reduce footprint (like original)
-                for i in 0..inst.len as usize {
-                    inst_buf[i] = *((old_inst_addr as *const u8).add(i));
-                }
+                // 使用 ptr::copy_nonoverlapping 替代循环
+                ptr::copy_nonoverlapping(
+                    old_inst_addr as *const u8,
+                    inst_buf.as_mut_ptr(),
+                    inst.len as usize,
+                );
             }
 
             // Relative address is stored at (instruction length - 4)
@@ -268,12 +270,13 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         trampoline.new_ips[trampoline.n_ip as usize] = new_pos;
         trampoline.n_ip += 1;
 
-        // Copy instruction (avoiding memcpy to reduce footprint like original)
+        // Copy instruction using ptr::copy_nonoverlapping (like original)
         unsafe {
-            for i in 0..copy_size {
-                *((trampoline.trampoline as *mut u8).add(new_pos as usize + i)) =
-                    *(copy_src.add(i));
-            }
+            ptr::copy_nonoverlapping(
+                copy_src,
+                (trampoline.trampoline as *mut u8).add(new_pos as usize),
+                copy_size,
+            );
         }
 
         new_pos += copy_size as u8;
