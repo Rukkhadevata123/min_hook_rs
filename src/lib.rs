@@ -1,85 +1,49 @@
 //! MinHook-rs: A Rust port of the MinHook API hooking library
 //!
 //! MinHook-rs is a minimalistic API hooking library for Windows x64.
-//! It provides a simple and easy-to-use API for intercepting Win32 functions.
+//! It provides a simple interface for intercepting Win32 functions.
 //!
 //! # Features
 //!
-//! - **Simple**: Extremely simple to use. Just call a few APIs.
-//! - **Thread-safe**: All APIs are thread-safe and can be called from multiple threads.
-//! - **Memory efficient**: Uses minimal memory footprint.
-//! - **x64 support**: Full support for 64-bit Windows applications.
+//! - **Simple**: Easy to use with just a few API calls
+//! - **Thread-safe**: All APIs are thread-safe
+//! - **Memory efficient**: Minimal memory footprint
+//! - **x64 support**: Full support for 64-bit Windows applications
+//! - **Rust safety**: Memory-safe implementation with error handling
 //!
-//! # Example
+//! # Usage
 //!
-//! ```rust,no_run
-//! use min_hook_rs::*;
-//! use std::ffi::c_void;
+//! The basic workflow is:
+//! 1. Call `initialize()` to initialize the library
+//! 2. Call `create_hook()` or `create_hook_api()` to create a hook
+//! 3. Call `enable_hook()` to activate the hook
+//! 4. Your hook function will intercept calls to the target function
+//! 5. Call `disable_hook()` and `remove_hook()` to clean up
+//! 6. Call `uninitialize()` to cleanup the library
 //!
-//! // Original function type
-//! type MessageBoxW = unsafe extern "system" fn(
-//!     hwnd: *mut c_void,
-//!     text: *const u16,
-//!     caption: *const u16,
-//!     utype: u32,
-//! ) -> i32;
+//! # Examples
 //!
-//! // Our detour function
-//! static mut ORIGINAL_MESSAGEBOX: Option<MessageBoxW> = None;
-//!
-//! unsafe extern "system" fn detour_messagebox(
-//!     hwnd: *mut c_void,
-//!     text: *const u16,
-//!     caption: *const u16,
-//!     utype: u32,
-//! ) -> i32 {
-//!     // Call original function
-//!     if let Some(original) = ORIGINAL_MESSAGEBOX {
-//!         original(hwnd, text, caption, utype)
-//!     } else {
-//!         0
-//!     }
-//! }
-//!
-//! fn main() -> Result<(), HookError> {
-//!     // Initialize MinHook
-//!     initialize()?;
-//!
-//!     // Create hook for MessageBoxW
-//!     let (trampoline, target) = create_hook_api(
-//!         "user32",
-//!         "MessageBoxW",
-//!         detour_messagebox as *mut c_void,
-//!     )?;
-//!
-//!     // Store the trampoline (original function)
-//!     unsafe {
-//!         ORIGINAL_MESSAGEBOX = Some(std::mem::transmute(trampoline));
-//!     }
-//!
-//!     // Enable the hook
-//!     enable_hook(target)?;
-//!
-//!     // Your application code here...
-//!
-//!     // Clean up
-//!     disable_hook(target)?;
-//!     remove_hook(target)?;
-//!     uninitialize()?;
-//!
-//!     Ok(())
-//! }
-//! ```
+//! See `examples/basic_hook.rs` for a complete working example demonstrating:
+//! - Hook creation and installation
+//! - Function interception and modification
+//! - Dynamic enable/disable functionality
+//! - Proper cleanup and resource management
 //!
 //! # Safety
 //!
-//! This library uses unsafe operations extensively for low-level memory manipulation
-//! and code patching. Users must ensure:
-//!
+//! This library uses unsafe operations for low-level memory manipulation.
+//! Users must ensure:
+//! - Hook functions have the exact same signature as target functions
 //! - Target functions are valid and executable
-//! - Detour functions have the same calling convention and signature
 //! - Proper initialization and cleanup
-//! - Thread safety when using hooks from multiple threads
+//!
+//! # Architecture
+//!
+//! MinHook-rs works by:
+//! 1. Analyzing the target function's machine code
+//! 2. Creating a "trampoline" function with the original prologue
+//! 3. Patching the target function with a jump to your hook
+//! 4. Your hook can call the trampoline to execute the original function
 
 pub mod buffer;
 pub mod disasm;
@@ -96,15 +60,17 @@ pub use hook::{
     uninitialize,
 };
 
-/// Library version information
+/// Library version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Check if the current platform is supported
+///
+/// Returns `true` if running on x86_64 Windows, `false` otherwise.
 pub fn is_supported() -> bool {
     cfg!(target_arch = "x86_64") && cfg!(target_os = "windows")
 }
 
-/// Get library information
+/// Get library version
 pub fn get_version() -> &'static str {
     VERSION
 }

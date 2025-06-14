@@ -1,178 +1,147 @@
-//! Basic hook example demonstrating MessageBoxW hooking
+//! Basic MessageBox Hook Example
 //!
-//! This example shows how to:
-//! 1. Initialize MinHook-rs
-//! 2. Create a hook for a Windows API function
-//! 3. Enable the hook
-//! 4. Test the hook by calling the original function
-//! 5. Clean up properly
+//! Simple MessageBoxA Hook demonstration showing before/after comparison
 
 use min_hook_rs::*;
 use std::ffi::c_void;
 use std::ptr;
+use windows_sys::Win32::Foundation::*;
+use windows_sys::Win32::UI::WindowsAndMessaging::*;
+use windows_sys::core::PCSTR;
 
-// Define the MessageBoxW function signature
-type MessageBoxWFn = unsafe extern "system" fn(
-    hwnd: *mut c_void,
-    text: *const u16,
-    caption: *const u16,
-    utype: u32,
-) -> i32;
+// MessageBoxA function signature
+type MessageBoxAFn = unsafe extern "system" fn(HWND, PCSTR, PCSTR, u32) -> i32;
 
-// Global variable to store the original function
-static mut ORIGINAL_MESSAGEBOX: Option<MessageBoxWFn> = None;
+// Store original function pointer
+static mut ORIGINAL_MESSAGEBOX: Option<MessageBoxAFn> = None;
 
-// Our detour function that will be called instead of the original
-unsafe extern "system" fn detour_messagebox(
-    hwnd: *mut c_void,
-    text: *const u16,
-    caption: *const u16,
-    utype: u32,
+// Hook function - modify message content
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn hooked_messagebox(
+    hwnd: HWND,
+    _text: PCSTR,
+    _caption: PCSTR,
+    _utype: u32,
 ) -> i32 {
-    println!("MessageBoxW hook called!");
+    println!("[HOOK] MessageBoxA intercepted!");
 
-    // Convert the text and caption to Rust strings for display
-    let text_str = wide_ptr_to_string(text);
-    let caption_str = wide_ptr_to_string(caption);
+    // Modified message content
+    let new_text = "MinHook-rs intercepted this message!\0";
+    let new_caption = "[HOOKED] Demo\0";
 
-    println!("  Caption: {}", caption_str);
-    println!("  Text: {}", text_str);
-    println!("  Type: 0x{:X}", utype);
-
-    // Call the original function
+    // Call original function
     unsafe {
-        if let Some(original) = ORIGINAL_MESSAGEBOX {
-            println!("Calling original MessageBoxW...");
-            original(hwnd, text, caption, utype)
-        } else {
-            println!("Original MessageBoxW not available!");
-            0
+        let original_ptr = ptr::addr_of!(ORIGINAL_MESSAGEBOX).read();
+
+        match original_ptr {
+            Some(original_fn) => original_fn(
+                hwnd,
+                new_text.as_ptr(),
+                new_caption.as_ptr(),
+                MB_ICONWARNING,
+            ),
+            None => {
+                // Fallback to system MessageBoxA
+                MessageBoxA(
+                    hwnd,
+                    new_text.as_ptr(),
+                    new_caption.as_ptr(),
+                    MB_ICONWARNING,
+                )
+            }
         }
     }
 }
 
-// Helper function to convert wide string pointer to Rust String
-fn wide_ptr_to_string(ptr: *const u16) -> String {
-    if ptr.is_null() {
-        return String::new();
-    }
+// Test MessageBox call
+fn show_test_message(title: &str, message: &str, description: &str) {
+    println!("{}", description);
+
+    let title_c = format!("{}\0", title);
+    let message_c = format!("{}\0", message);
 
     unsafe {
-        let mut len = 0;
-        while *ptr.add(len) != 0 {
-            len += 1;
-        }
-
-        let slice = std::slice::from_raw_parts(ptr, len);
-        String::from_utf16_lossy(slice)
+        MessageBoxA(
+            ptr::null_mut(),
+            message_c.as_ptr(),
+            title_c.as_ptr(),
+            MB_ICONINFORMATION,
+        );
     }
 }
 
-// Helper function to convert Rust string to wide string
-fn string_to_wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
-}
+fn main() -> Result<()> {
+    println!("MinHook-rs MessageBox Hook Demo");
+    println!("================================");
 
-// Declare the MessageBoxW function for testing
-unsafe extern "system" {
-    fn MessageBoxW(hwnd: *mut c_void, text: *const u16, caption: *const u16, utype: u32) -> i32;
-}
-
-fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    println!("MinHook-rs Basic Hook Example");
-    println!("=============================");
-
-    // Check if platform is supported
     if !is_supported() {
-        eprintln!("This example only works on x64 Windows!");
+        eprintln!("Error: Only supports x64 Windows!");
         return Ok(());
     }
 
-    println!("Platform supported: {}", is_supported());
-    println!("Library version: {}", get_version());
+    // Phase 1: Test original behavior
+    println!("\n[PHASE 1] Testing original MessageBox behavior");
+    show_test_message(
+        "Original Behavior",
+        "This is the original MessageBoxA call.\nNo hook is active.",
+        "Showing original MessageBox...",
+    );
 
-    // Initialize MinHook
-    println!("\n1. Initializing MinHook-rs...");
-    initialize().map_err(|e| format!("Failed to initialize: {}", e))?;
-    println!("   ✓ MinHook-rs initialized successfully");
+    // Phase 2: Initialize and create hook
+    println!("\n[PHASE 2] Installing hook");
+    println!("Initializing MinHook...");
+    initialize()?;
 
-    // Create hook for MessageBoxW
-    println!("\n2. Creating hook for MessageBoxW...");
+    println!("Creating MessageBoxA hook...");
     let (trampoline, target) =
-        create_hook_api("user32", "MessageBoxW", detour_messagebox as *mut c_void)
-            .map_err(|e| format!("Failed to create hook: {}", e))?;
+        create_hook_api("user32", "MessageBoxA", hooked_messagebox as *mut c_void)?;
 
-    println!("   ✓ Hook created successfully");
-    println!("   Target address: {:p}", target);
-    println!("   Trampoline address: {:p}", trampoline);
-
-    // Store the original function pointer
     unsafe {
         ORIGINAL_MESSAGEBOX = Some(std::mem::transmute(trampoline));
     }
 
-    // Enable the hook
-    println!("\n3. Enabling hook...");
-    enable_hook(target).map_err(|e| format!("Failed to enable hook: {}", e))?;
-    println!("   ✓ Hook enabled successfully");
+    println!("Enabling hook...");
+    enable_hook(target)?;
+    println!("Hook activated successfully!");
 
-    // Test the hook by calling MessageBoxW
-    println!("\n4. Testing the hook...");
-    println!("   Calling MessageBoxW - this should trigger our hook!");
-
-    let title = string_to_wide("MinHook-rs Test");
-    let message = string_to_wide(
-        "This message box was intercepted by MinHook-rs!\n\nOriginal function called successfully.",
+    // Phase 3: Test hook effect
+    println!("\n[PHASE 3] Testing hook effect");
+    show_test_message(
+        "Test Message",
+        "This message should be intercepted and modified!",
+        "Showing hooked MessageBox...",
     );
 
-    unsafe {
-        MessageBoxW(
-            ptr::null_mut(),
-            message.as_ptr(),
-            title.as_ptr(),
-            0x40, // MB_ICONINFORMATION
-        );
-    }
+    // Phase 4: Multiple tests for stability
+    println!("\n[PHASE 4] Testing hook stability");
+    show_test_message("Second Test", "Second call test", "Second hook test...");
+    show_test_message("Third Test", "Third call test", "Third hook test...");
 
-    println!("   ✓ Hook test completed");
+    // Phase 5: Disable hook
+    println!("\n[PHASE 5] Disabling hook");
+    disable_hook(target)?;
+    println!("Hook disabled");
 
-    // Disable the hook
-    println!("\n5. Disabling hook...");
-    disable_hook(target).map_err(|e| format!("Failed to disable hook: {}", e))?;
-    println!("   ✓ Hook disabled successfully");
+    // Phase 6: Verify hook is disabled
+    println!("\n[PHASE 6] Verifying hook is disabled");
+    show_test_message(
+        "Hook Disabled",
+        "This message should show normal content.\nHook has been disabled.",
+        "Showing normal MessageBox after disable...",
+    );
 
-    // Test that the hook is disabled
-    println!("\n6. Testing with hook disabled...");
-    println!("   Calling MessageBoxW again - should NOT trigger our hook");
+    // Phase 7: Cleanup
+    println!("\n[PHASE 7] Cleanup");
+    remove_hook(target)?;
+    uninitialize()?;
+    println!("Cleanup completed");
 
-    let title2 = string_to_wide("Hook Disabled");
-    let message2 = string_to_wide("This message should appear normally without hook interception.");
-
-    unsafe {
-        MessageBoxW(
-            ptr::null_mut(),
-            message2.as_ptr(),
-            title2.as_ptr(),
-            0x30, // MB_ICONWARNING
-        );
-    }
-
-    // Remove the hook
-    println!("\n7. Removing hook...");
-    remove_hook(target).map_err(|e| format!("Failed to remove hook: {}", e))?;
-    println!("   ✓ Hook removed successfully");
-
-    // Uninitialize MinHook
-    println!("\n8. Uninitializing MinHook-rs...");
-    uninitialize().map_err(|e| format!("Failed to uninitialize: {}", e))?;
-    println!("   ✓ MinHook-rs uninitialized successfully");
-
-    println!("\n✓ All tests completed successfully!");
-    println!("\nPress Enter to exit...");
-
-    // Wait for user input
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input).ok();
+    println!("\nDemo completed successfully!");
+    println!("\nSummary:");
+    println!("- Original behavior: Normal MessageBox");
+    println!("- Hook active: Message intercepted and modified");
+    println!("- Hook disabled: Normal behavior restored");
+    println!("- Complete cleanup: System returned to initial state");
 
     Ok(())
 }

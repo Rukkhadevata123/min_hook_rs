@@ -5,6 +5,8 @@
         "cflags",
         "disasm",
         "disp",
-        "MODRM"
+        "messagebox",
+        "MODRM",
+        "PCSTR"
     ],
 }
