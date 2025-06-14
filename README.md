@@ -56,35 +56,76 @@ fn main() -> Result<()> {
 
 ## Examples
 
+### Basic Hook Example
+
 Run the complete example:
 
 ```bash
 cargo run --example basic_hook --target x86_64-pc-windows-msvc --release
 ```
 
-Output:
+### MessageBox Hook Examples
 
+The `examples/messagebox/` directory contains comprehensive MessageBox hooking examples:
+
+- **`simple_messagebox_hook.rs`**: DLL that hooks MessageBoxA to replace all message content
+- **`simple_injector.rs`**: Generic DLL injector for testing hooks
+- **`messagebox_test.rs`**: Test program that displays multiple MessageBox dialogs
+
+Build and test:
+
+```bash
+# Build the hook DLL
+cargo xwin build --example simple_messagebox_hook --target x86_64-pc-windows-msvc --release
+
+# Build the injector
+cargo xwin build --example simple_injector --target x86_64-pc-windows-msvc --release
+
+# Build test program
+cargo xwin build --example messagebox_test --target x86_64-pc-windows-msvc --release
+
+# Usage: inject DLL into test program
+wine target/x86_64-pc-windows-msvc/release/examples/simple_injector.exe <PID> <DLL_PATH>
 ```
-MinHook-rs MessageBox Hook Demo
-================================
 
-[PHASE 1] Testing original MessageBox behavior
-Showing original MessageBox...
+### Notepad Hook Examples
 
-[PHASE 2] Installing hook
-Hook activated successfully!
+The `examples/notepad/` directory demonstrates real-world application hooking:
 
-[PHASE 3] Testing hook effect
-[HOOK] MessageBoxA intercepted!
+- **`notepad_hook_dll.rs`**: Hooks Notepad's exit confirmation dialog
+- **`notepad_injector.rs`**: Specialized injector for Notepad processes
 
-[PHASE 4] Testing hook stability
-[HOOK] MessageBoxA intercepted!
+Build and test:
 
-[PHASE 5] Disabling hook
-Hook disabled
+```bash
+# Build the Notepad hook DLL
+cargo xwin build --example notepad_hook_dll --target x86_64-pc-windows-msvc --release
 
-Demo completed successfully!
+# Build the injector
+cargo xwin build --example notepad_injector --target x86_64-pc-windows-msvc --release
+
+# Start Notepad
+wine notepad.exe &
+
+# Find Notepad PID
+ps aux | grep notepad
+
+# Inject hook
+wine target/x86_64-pc-windows-msvc/release/examples/notepad_injector.exe <PID> target/x86_64-pc-windows-msvc/release/examples/notepad_hook_dll.dll
+
+# Test: Type text in Notepad, then try to close without saving
+# You should see a custom dialog instead of the normal save confirmation
 ```
+
+## Testing
+
+The library includes comprehensive test examples:
+
+1. **Basic Hook**: Simple MessageBoxA interception (`basic_hook.rs`)
+2. **MessageBox Examples**: Complete DLL injection workflow (`examples/messagebox/`)
+3. **Real Application Hook**: Notepad dialog interception (`examples/notepad/`)
+
+Each example demonstrates different aspects of the hooking process, from simple function replacement to complex real-world application scenarios.
 
 ## x86_64 Instruction Format
 
@@ -232,6 +273,16 @@ Hooked:   [Target Function] → [Hook Function] → [Trampoline] → [Original B
 
 The trampoline preserves the original function's behavior while allowing interception.
 
+## Testing
+
+The library includes comprehensive test examples:
+
+1. **Basic Hook**: Simple MessageBoxA interception (`basic_hook.rs`)
+2. **MessageBox Examples**: Complete DLL injection workflow (`examples/messagebox/`)
+3. **Real Application Hook**: Notepad dialog interception (`examples/notepad/`)
+
+Each example demonstrates different aspects of the hooking process, from simple function replacement to complex real-world application scenarios.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file.
@@ -239,4 +290,4 @@ MIT License - see [LICENSE](LICENSE) file.
 ## Acknowledgments
 
 - Original [MinHook](https://github.com/TsudaKageyu/minhook) by Tsuda Kageyu
-- Intel x86-64 Architecture documentation
+- Intel x86-64 Architecture

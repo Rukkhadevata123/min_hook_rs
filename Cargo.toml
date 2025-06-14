@@ -29,32 +29,55 @@ features = ["derive"]
 [dependencies.serde_json]
 version = "1.0"
 
+# Basic Hook Example
 [[example]]
 name = "basic_hook"
 path = "examples/basic_hook.rs"
 
-# B服原神Hook DLL
+# MessageBox Examples
 [[example]]
-name = "genshin_bili_dll"
-path = "examples/genshin_bili_dll.rs"
+name = "simple_messagebox_hook"
+path = "examples/messagebox/simple_messagebox_hook.rs"
 crate-type = ["cdylib"]
 
-# B服原神注入器
+[[example]]
+name = "simple_injector"
+path = "examples/messagebox/simple_injector.rs"
+
+[[example]]
+name = "messagebox_test"
+path = "examples/messagebox/messagebox_test.rs"
+
+# Notepad Examples
+[[example]]
+name = "notepad_hook_dll"
+path = "examples/notepad/notepad_hook_dll.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "notepad_injector"
+path = "examples/notepad/notepad_injector.rs"
+
+# Genshin Examples
+[[example]]
+name = "genshin_bili_dll"
+path = "examples/genshin/genshin_bili_dll.rs"
+crate-type = ["cdylib"]
+
 [[example]]
 name = "genshin_bili_injector"
-path = "examples/genshin_bili_injector.rs"
+path = "examples/genshin/genshin_bili_injector.rs"
 
-# FPS解锁器
 [[example]]
 name = "genshin_fps_unlocker"
-path = "examples/genshin_fps_unlocker.rs"
+path = "examples/genshin/genshin_fps_unlocker.rs"
 
 [profile.release]
 lto = true
 opt-level = "z"
 panic = "abort"
 
-# 库配置
+# Library configuration
 [lib]
 name = "min_hook_rs"
 crate-type = ["rlib"]

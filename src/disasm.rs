@@ -1,68 +1,68 @@
-//! MinHook 专用的最小化反汇编器
-//! 只实现 trampoline.c 实际需要的功能
+//! Minimal disassembler specifically designed for MinHook
+//! Only implements functionality actually needed by trampoline.c
 
 #[cfg(not(target_arch = "x86_64"))]
 compile_error!("MinHook-rs only supports x86_64");
 
-/// Hook 专用指令信息
+/// Hook-specific instruction information
 #[derive(Debug, Clone, Default)]
 pub struct HookInstruction {
-    /// 指令长度（最重要）
+    /// Instruction length (most important)
     pub len: u8,
-    /// 操作码
+    /// Primary opcode
     pub opcode: u8,
-    /// 第二操作码（双字节指令）
+    /// Secondary opcode (for two-byte instructions)
     pub opcode2: u8,
-    /// ModR/M 字节
+    /// ModR/M byte
     pub modrm: u8,
-    /// 立即数值
+    /// Immediate value
     pub immediate: i32,
-    /// 位移值  
+    /// Displacement value
     pub displacement: i32,
-    /// 是否解析错误
+    /// Whether parsing failed
     pub error: bool,
 }
 
 impl HookInstruction {
-    /// 是否是 RIP 相对寻址 (ModR/M = 00???101)
+    /// Check if instruction uses RIP-relative addressing (ModR/M = 00???101)
     #[inline]
     pub fn is_rip_relative(&self) -> bool {
         (self.modrm & 0xC7) == 0x05
     }
 
-    /// 是否是直接 CALL (E8)
+    /// Check if instruction is direct CALL (E8)
     #[inline]
     pub fn is_call(&self) -> bool {
         self.opcode == 0xE8
     }
 
-    /// 是否是直接 JMP (E9/EB)
+    /// Check if instruction is direct JMP (E9/EB)
     #[inline]
     pub fn is_jmp(&self) -> bool {
         matches!(self.opcode, 0xE9 | 0xEB)
     }
 
-    /// 是否是条件跳转
+    /// Check if instruction is conditional jump
     #[inline]
     pub fn is_conditional(&self) -> bool {
-        (self.opcode & 0xF0) == 0x70 || // 短条件跳转
-        (self.opcode & 0xFC) == 0xE0 || // LOOP系列
-        (self.opcode2 & 0xF0) == 0x80 // 长条件跳转
+        (self.opcode & 0xF0) == 0x70 || // Short conditional jumps
+        (self.opcode & 0xFC) == 0xE0 || // LOOP series
+        (self.opcode2 & 0xF0) == 0x80 // Long conditional jumps
     }
 
-    /// 是否是 RET
+    /// Check if instruction is RET
     #[inline]
     pub fn is_ret(&self) -> bool {
         (self.opcode & 0xFE) == 0xC2
     }
 
-    /// 是否是间接 JMP (FF /4)
+    /// Check if instruction is indirect JMP (FF /4)
     #[inline]
     pub fn is_indirect_jmp(&self) -> bool {
         self.opcode == 0xFF && (self.modrm >> 3 & 7) == 4
     }
 
-    /// 计算相对跳转目标地址
+    /// Calculate relative jump target address
     pub fn relative_target(&self, inst_addr: usize) -> Option<usize> {
         if !(self.is_call() || self.is_jmp() || self.is_conditional()) {
             return None;
@@ -84,7 +84,7 @@ impl HookInstruction {
     }
 }
 
-/// 解析单条指令（基于原始 HDE64 逻辑的简化版）
+/// Decode single instruction (simplified version based on original HDE64 logic)
 pub fn decode_instruction(code: &[u8]) -> HookInstruction {
     let mut inst = HookInstruction::default();
 
@@ -95,14 +95,14 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
 
     let mut pos = 0;
 
-    // 跳过前缀（最多15字节）
+    // Skip prefixes (up to 15 bytes)
     let mut prefix_count = 0;
     while pos < code.len() && prefix_count < 15 {
         match code[pos] {
             0x40..=0x4F => {
                 pos += 1;
                 prefix_count += 1;
-            } // REX 前缀
+            } // REX prefix
             0x66 | 0x67 | 0xF0 | 0xF2 | 0xF3 => {
                 pos += 1;
                 prefix_count += 1;
@@ -120,11 +120,11 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
         return inst;
     }
 
-    // 操作码
+    // Primary opcode
     inst.opcode = code[pos];
     pos += 1;
 
-    // 双字节操作码
+    // Two-byte opcode
     if inst.opcode == 0x0F {
         if pos >= code.len() {
             inst.error = true;
@@ -134,9 +134,9 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
         pos += 1;
     }
 
-    // 根据指令类型解析（基于 trampoline.c 的实际需求）
+    // Parse based on instruction type (based on actual needs from trampoline.c)
     match inst.opcode {
-        // 直接相对 CALL/JMP
+        // Direct relative CALL/JMP
         0xE8 | 0xE9 => {
             if code.len() < pos + 4 {
                 inst.error = true;
@@ -146,7 +146,7 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
             pos += 4;
         }
 
-        // 短跳转
+        // Short jump
         0xEB => {
             if pos >= code.len() {
                 inst.error = true;
@@ -156,7 +156,7 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
             pos += 1;
         }
 
-        // 短条件跳转 (70-7F)
+        // Short conditional jumps (70-7F)
         op if (op & 0xF0) == 0x70 => {
             if pos >= code.len() {
                 inst.error = true;
@@ -166,7 +166,7 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
             pos += 1;
         }
 
-        // LOOP 系列 (E0-E3)
+        // LOOP series (E0-E3)
         op if (op & 0xFC) == 0xE0 => {
             if pos >= code.len() {
                 inst.error = true;
@@ -176,7 +176,7 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
             pos += 1;
         }
 
-        // 长条件跳转（0F 8x）
+        // Long conditional jumps (0F 8x)
         _ if inst.opcode2 != 0 && (inst.opcode2 & 0xF0) == 0x80 => {
             if code.len() < pos + 4 {
                 inst.error = true;
@@ -186,22 +186,22 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
             pos += 4;
         }
 
-        // RET 指令
+        // RET instructions
         0xC2 => {
             if code.len() < pos + 2 {
                 inst.error = true;
                 return inst;
             }
-            pos += 2; // 跳过 16位立即数
+            pos += 2; // Skip 16-bit immediate
         }
 
         0xC3 => {
-            // 无操作数
+            // No operands
         }
 
-        // 其他指令：使用简化的长度计算
+        // Other instructions: use simplified length calculation
         _ => {
-            // 检查是否需要 ModR/M
+            // Check if ModR/M is needed
             if needs_modrm(inst.opcode, inst.opcode2) {
                 if pos >= code.len() {
                     inst.error = true;
@@ -214,20 +214,20 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
                 let mod_bits = inst.modrm >> 6;
                 let rm = inst.modrm & 7;
 
-                // SIB 字节
+                // SIB byte
                 if mod_bits != 3 && rm == 4 {
                     if pos >= code.len() {
                         inst.error = true;
                         return inst;
                     }
-                    pos += 1; // 跳过 SIB
+                    pos += 1; // Skip SIB
                 }
 
-                // 位移处理
+                // Displacement handling
                 let disp_size = match mod_bits {
-                    0 if rm == 5 => 4, // RIP 相对寻址
-                    1 => 1,            // 8位位移
-                    2 => 4,            // 32位位移
+                    0 if rm == 5 => 4, // RIP-relative addressing
+                    1 => 1,            // 8-bit displacement
+                    2 => 4,            // 32-bit displacement
                     _ => 0,
                 };
 
@@ -237,7 +237,7 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
                         return inst;
                     }
 
-                    // 提取 RIP 相对寻址的位移
+                    // Extract displacement for RIP-relative addressing
                     if (inst.modrm & 0xC7) == 0x05 && disp_size == 4 {
                         inst.displacement = read_i32(&code[pos..]).unwrap_or(0);
                     }
@@ -245,7 +245,7 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
                     pos += disp_size;
                 }
             } else {
-                // 简单指令的立即数处理
+                // Immediate value handling for simple instructions
                 let imm_size = get_immediate_size(inst.opcode, inst.opcode2);
                 if imm_size > 0 {
                     if code.len() < pos + imm_size {
@@ -267,7 +267,7 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
     inst
 }
 
-/// 读取 32位有符号整数
+/// Read 32-bit signed integer
 #[inline]
 fn read_i32(data: &[u8]) -> Option<i32> {
     if data.len() >= 4 {
@@ -277,13 +277,13 @@ fn read_i32(data: &[u8]) -> Option<i32> {
     }
 }
 
-/// 检查指令是否需要 ModR/M 字节（简化版）
+/// Check if instruction needs ModR/M byte (simplified version)
 fn needs_modrm(opcode: u8, opcode2: u8) -> bool {
     if opcode2 != 0 {
-        // 大部分双字节指令都需要 ModR/M，除了一些特殊的
+        // Most two-byte instructions need ModR/M, except some special ones
         !matches!(opcode2, 0x01 | 0x06 | 0x08 | 0x09 | 0x0B | 0x30..=0x37)
     } else {
-        // 单字节指令中需要 ModR/M 的（简化列表）
+        // Single-byte instructions that need ModR/M (simplified list)
         matches!(opcode,
             0x00..=0x03 | 0x08..=0x0B | 0x10..=0x13 | 0x18..=0x1B |
             0x20..=0x23 | 0x28..=0x2B | 0x30..=0x33 | 0x38..=0x3B |
@@ -293,22 +293,22 @@ fn needs_modrm(opcode: u8, opcode2: u8) -> bool {
     }
 }
 
-/// 获取立即数大小（简化版）
+/// Get immediate value size (simplified version)
 fn get_immediate_size(opcode: u8, opcode2: u8) -> usize {
     if opcode2 != 0 {
-        return 0; // 双字节指令的立即数处理更复杂，这里简化
+        return 0; // Two-byte instruction immediate handling is more complex, simplified here
     }
 
     match opcode {
-        // 8位立即数
+        // 8-bit immediate
         0x04 | 0x0C | 0x14 | 0x1C | 0x24 | 0x2C | 0x34 | 0x3C => 1,
         0xB0..=0xB7 => 1, // MOV reg8, imm8
 
-        // 32位立即数
+        // 32-bit immediate
         0x05 | 0x0D | 0x15 | 0x1D | 0x25 | 0x2D | 0x35 | 0x3D => 4,
         0xB8..=0xBF => 4, // MOV reg32/64, imm32/64
 
-        // 16位立即数（某些情况下）
+        // 16-bit immediate (in certain cases)
         0x68 => 4, // PUSH imm32
         0x6A => 1, // PUSH imm8
 
@@ -316,7 +316,7 @@ fn get_immediate_size(opcode: u8, opcode2: u8) -> usize {
     }
 }
 
-/// Hook 安全性检查
+/// Hook safety check
 pub fn can_hook_safely(code: &[u8], required_length: usize) -> bool {
     if code.len() < required_length {
         return false;
@@ -332,14 +332,14 @@ pub fn can_hook_safely(code: &[u8], required_length: usize) -> bool {
             return false;
         }
 
-        // 检查内部跳转
+        // Check for internal jumps
         if let Some(target) = inst.relative_target(pos) {
             if target < required_length {
                 return false;
             }
         }
 
-        // 检查 RET
+        // Check for RET
         if inst.is_ret() && total_len < required_length {
             return false;
         }
@@ -351,7 +351,7 @@ pub fn can_hook_safely(code: &[u8], required_length: usize) -> bool {
     total_len >= required_length
 }
 
-/// 扫描指令边界
+/// Scan instruction boundaries
 pub fn scan_boundaries(code: &[u8], max_bytes: usize) -> Vec<u8> {
     let mut boundaries = Vec::new();
     let mut pos = 0;
