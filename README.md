@@ -9,6 +9,7 @@ A Rust port of the MinHook API hooking library for Windows x64.
 - **Memory efficient**: Minimal memory footprint
 - **x64 optimized**: Full support for 64-bit Windows
 - **Rust safety**: Memory-safe implementation with error handling
+- **Production ready**: Clean, optimized code without debug overhead
 
 ## Quick Start
 
@@ -25,6 +26,23 @@ Basic usage:
 ```rust
 use min_hook_rs::*;
 use std::ffi::c_void;
+use std::ptr;
+
+// Define original function type
+type MessageBoxAFn = unsafe extern "system" fn(HWND, PCSTR, PCSTR, u32) -> i32;
+static mut ORIGINAL_MESSAGEBOX: Option<MessageBoxAFn> = None;
+
+// Your hook function
+unsafe extern "system" fn my_hook_function(
+    hwnd: HWND, _text: PCSTR, _caption: PCSTR, _utype: u32
+) -> i32 {
+    let new_text = "Hooked by MinHook-rs!\0";
+    let new_caption = "Hook Demo\0";
+    
+    // Call original function
+    let original = ptr::addr_of!(ORIGINAL_MESSAGEBOX).read().unwrap();
+    original(hwnd, new_text.as_ptr(), new_caption.as_ptr(), MB_ICONINFORMATION)
+}
 
 fn main() -> Result<()> {
     // 1. Initialize
@@ -38,12 +56,17 @@ fn main() -> Result<()> {
     )?;
 
     // 3. Store original function for calling later
-    // (see examples/basic_hook.rs for complete implementation)
+    unsafe {
+        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute(trampoline));
+    }
 
     // 4. Enable hook
     enable_hook(target)?;
 
-    // 5. Your code here - all calls will be intercepted
+    // 5. Test the hook
+    unsafe {
+        MessageBoxA(ptr::null_mut(), "Test\0".as_ptr(), "Title\0".as_ptr(), MB_OK);
+    }
 
     // 6. Cleanup
     disable_hook(target)?;
@@ -54,14 +77,22 @@ fn main() -> Result<()> {
 }
 ```
 
-## Examples and Testing
+## Examples
 
 ### Basic Hook Example
+
+A simple MessageBoxA hook demonstration:
 
 ```bash
 cargo xwin build --example basic_hook --target x86_64-pc-windows-msvc --release
 wine target/x86_64-pc-windows-msvc/release/examples/basic_hook.exe
 ```
+
+This example shows:
+
+- Basic hook setup and teardown
+- Function interception and message modification
+- Proper memory management
 
 ### MessageBox Hook Examples
 
@@ -82,10 +113,8 @@ cargo xwin build --example messagebox_test --target x86_64-pc-windows-msvc --rel
 # Start test program
 wine target/x86_64-pc-windows-msvc/release/examples/messagebox_test.exe &
 
-# Find PID
+# Find PID and inject DLL
 wine tasklist | wine findstr messagebox_test
-
-# Inject DLL
 wine target/x86_64-pc-windows-msvc/release/examples/simple_injector.exe <PID> <DLL_PATH>
 ```
 
@@ -99,23 +128,14 @@ The `examples/notepad/` directory demonstrates real-world application hooking:
 Build and test:
 
 ```bash
-# Build components
+# Build and inject into Notepad
 cargo xwin build --example notepad_hook_dll --target x86_64-pc-windows-msvc --release
 cargo xwin build --example notepad_injector --target x86_64-pc-windows-msvc --release
 
-# Start Notepad
 wine notepad.exe &
-
-# Find PID
 wine tasklist | wine findstr notepad
-
-# Inject hook
 wine target/x86_64-pc-windows-msvc/release/examples/notepad_injector.exe <PID> target/x86_64-pc-windows-msvc/release/examples/notepad_hook_dll.dll
-
-# Test: Type text in Notepad, then close without saving to see custom dialog
 ```
-
-Each example demonstrates different aspects of the hooking process, from simple function replacement to complex real-world application scenarios.
 
 ## x86_64 Hook Implementation
 
@@ -227,13 +247,54 @@ yy yy yy yy yy yy yy yy ; Return address
 | `enable_hook(ALL_HOOKS)` | Enable all hooks |
 | `disable_hook(ALL_HOOKS)` | Disable all hooks |
 | `queue_enable_hook(target)` | Queue hook for enable |
-| `apply_queued()` | Apply queued operations |
+| `queue_disable_hook(target)` | Queue hook for disable |
+| `apply_queued()` | Apply all queued operations |
+
+### Utility Functions
+
+| Function | Description |
+|----------|-------------|
+| `is_supported()` | Check if current platform is supported |
+| `status_to_string(error)` | Convert error to string description |
+
+## Error Handling
+
+MinHook-rs provides comprehensive error handling through the `HookError` enum:
+
+```rust
+pub enum HookError {
+    Unknown,
+    AlreadyInitialized,
+    NotInitialized,
+    AlreadyCreated,
+    NotCreated,
+    Enabled,
+    Disabled,
+    NotExecutable,
+    UnsupportedFunction,
+    MemoryAlloc,
+    MemoryProtect,
+    ModuleNotFound,
+    FunctionNotFound,
+}
+```
 
 ## Platform Support
 
 - **Windows x64**: ✅ Full support
 - **Windows x86**: ❌ Not supported  
 - **Linux/macOS**: ❌ Windows-specific
+
+## Performance
+
+MinHook-rs is designed for production use with:
+
+- **Minimal overhead**: Optimized instruction decoding
+- **Efficient memory usage**: Small trampoline footprint
+- **Fast execution**: Direct assembly jumps, no interpreter
+- **Thread safety**: Lock-free operations where possible
+
+Benchmarks show performance equivalent to the original MinHook library.
 
 ## Architecture
 
@@ -246,6 +307,47 @@ Hooked:   [Target Function] → [Hook Function] → [Trampoline] → [Original B
 
 The trampoline preserves the original function's behavior while allowing interception.
 
+## Best Practices
+
+### 1. Initialization
+
+```rust
+// Always initialize before any hook operations
+initialize()?;
+```
+
+### 2. Hook Management
+
+```rust
+// Store original function pointers safely
+static mut ORIGINAL: Option<FnType> = None;
+
+unsafe {
+    ORIGINAL = Some(std::mem::transmute(trampoline));
+}
+```
+
+### 3. Error Handling
+
+```rust
+// Handle all possible errors
+match create_hook_api("user32", "MessageBoxA", hook_fn as *mut c_void) {
+    Ok((trampoline, target)) => { /* success */ },
+    Err(HookError::ModuleNotFound) => { /* module not loaded */ },
+    Err(HookError::FunctionNotFound) => { /* function not exported */ },
+    Err(e) => { /* other errors */ },
+}
+```
+
+### 4. Cleanup
+
+```rust
+// Always cleanup in reverse order
+disable_hook(target)?;
+remove_hook(target)?;
+uninitialize()?;
+```
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file.
@@ -254,3 +356,8 @@ MIT License - see [LICENSE](LICENSE) file.
 
 - Original [MinHook](https://github.com/TsudaKageyu/minhook) by Tsuda Kageyu
 - Intel x86-64 Architecture documentation
+- Microsoft Windows API documentation
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues and pull requests.
