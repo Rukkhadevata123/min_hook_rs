@@ -480,7 +480,7 @@ MIT License - see [LICENSE](LICENSE) file.
 ## Acknowledgments
 
 - Original [MinHook](https://github.com/TsudaKageyu/minhook) by Tsuda Kageyu
-- [HDE64](https://github.com/EthanArbuckle/hde64) disassembler engine by Vyacheslav Patkov
+- [HDE64](https://github.com/Cerbersec/HDE64) disassembler engine by Vyacheslav Patkov
 - Intel x86-64 Architecture documentation
 - Microsoft Windows API documentation
 
