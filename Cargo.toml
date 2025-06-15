@@ -12,6 +12,7 @@ readme = "README.md"
 keywords = ["hook", "windows", "x64", "function", "detour"]
 categories = ["os::windows-apis", "development-tools", "api-bindings"]
 exclude = [
+    "examples/",
     "minhook/",
     ".github/",
     "*.exe",
