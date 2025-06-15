@@ -1,6 +1,6 @@
 [package]
 name = "min_hook_rs"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 license = "MIT"
 authors = ["Rukkhadevata123 <3083913301@qq.com>"]
@@ -24,6 +24,9 @@ exclude = [
     "fpsunlock/"
 ]
 
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+targets = ["x86_64-pc-windows-msvc"]
 
 [dependencies.windows-sys]
 version = "0.60"
