@@ -1,4 +1,5 @@
 //! 原神B服Hook DLL - 干掉屑IE！让Linux也能玩上B服原神
+//! 感谢 [gs_bili](https://github.com/QiE2035/gs_bili) 提供灵感
 //!
 //! ## 使用方法
 //!

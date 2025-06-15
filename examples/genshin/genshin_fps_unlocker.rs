@@ -1,6 +1,8 @@
 //! 原神FPS解锁器 - Rust版本
 //!
 //! 基于原始C版本重写，支持GI v4.8.0+
+//! 
+//! > 感谢[fpsunlock](https://codeberg.org/mkrsym1/fpsunlock) 提供灵感
 //!
 //! ## 使用方法
 //! ```bash

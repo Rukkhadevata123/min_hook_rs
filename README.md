@@ -1,16 +1,19 @@
 # MinHook-rs
 
-A Rust port of the MinHook API hooking library for Windows x64.
+[![Crates.io](https://img.shields.io/crates/v/min_hook_rs)](https://crates.io/crates/min_hook_rs)
+[![Documentation](https://docs.rs/min_hook_rs/badge.svg)](https://docs.rs/min_hook_rs)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+A Rust implementation of the MinHook library for Windows x64 function hooking.
 
 ## Features
 
-- **Simple**: Easy to use with just a few API calls
-- **Thread-safe**: All APIs are thread-safe  
-- **Memory efficient**: Minimal memory footprint
-- **x64 optimized**: Full support for 64-bit Windows
-- **Rust safety**: Memory-safe implementation with error handling
-- **Production ready**: Clean, optimized code without debug overhead
-- **Precise instruction decoding**: Custom x64 disassembler optimized for hook creation
+- **Precise instruction decoder** - Custom x64 disassembler optimized for hook creation
+- **Thread-safe operations** - All APIs are thread-safe with proper synchronization  
+- **Memory efficient** - Minimal memory footprint with optimized data structures
+- **Comprehensive error handling** - Detailed error reporting for all edge cases
+- **Production ready** - Extensively tested with multiple hook scenarios
+- **Zero-copy design** - Efficient instruction processing without unnecessary allocations
 
 ## Quick Start
 
@@ -18,7 +21,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-min_hook_rs = "1.1.0"
+min_hook_rs = "1.2.0"
 windows-sys = { version = "0.60", features = ["Win32_UI_WindowsAndMessaging"] }
 ```
 
@@ -80,27 +83,26 @@ fn main() -> Result<()> {
 
 ## Examples
 
-### Enhanced Basic Hook Example
+### Basic Hook Example
 
-Our comprehensive example demonstrates all MinHook-rs features:
+Run our comprehensive example that demonstrates all MinHook-rs features:
 
 ```bash
-cargo xwin build --example basic_hook --target x86_64-pc-windows-msvc --release
-wine target/x86_64-pc-windows-msvc/release/examples/basic_hook.exe
+cargo run --example basic_hook
 ```
 
-This enhanced example includes:
+This example includes:
 
-- **Basic hook functionality**: MessageBoxA interception and modification
-- **Multiple simultaneous hooks**: MessageBoxA + GetTickCount concurrent hooking
-- **Dynamic enable/disable cycles**: 10 rounds of rapid hook state changes
-- **Queued operations**: Complex operation sequences with batch application
-- **Comprehensive error handling**: All edge cases and invalid operations
-- **Recursive call handling**: Safe recursive hook execution
-- **High-frequency performance test**: 1000+ calls with performance metrics
-- **Memory safety verification**: No leaks or corruption under stress
+- Basic hook functionality with MessageBoxA interception
+- Multiple simultaneous hooks (MessageBoxA + GetTickCount)
+- Dynamic enable/disable cycles for stress testing
+- Queued operations with batch application
+- Comprehensive error handling and edge cases
+- Recursive call handling and safety verification
+- High-frequency performance testing with 1000+ calls
+- Memory safety verification under stress conditions
 
-Expected output includes 12 test phases covering all functionality aspects.
+The example runs 12 test phases covering all functionality aspects with detailed output and performance metrics.
 
 ### MessageBox Hook Examples
 
@@ -145,155 +147,87 @@ wine tasklist | wine findstr notepad
 wine target/x86_64-pc-windows-msvc/release/examples/notepad_injector.exe <PID> target/x86_64-pc-windows-msvc/release/examples/notepad_hook_dll.dll
 ```
 
-## x86_64 Instruction Disassembler
+## x86_64 Instruction Format and Disassembler
 
-MinHook-rs features a custom x86_64 instruction decoder specifically optimized for hook creation, providing significant advantages over generic disassemblers.
+Understanding x86_64 instruction encoding is crucial for reliable function hooking. MinHook-rs includes a custom instruction decoder designed specifically for hook creation.
 
-### Design Philosophy
+### Instruction Structure
 
-Our disassembler follows the principle of **"absolute precision, complete streamlining"**:
+x86_64 instructions use variable-length encoding with up to 7 components:
 
-- **Absolutely precise**: 100% accurate instruction length calculation using HDE64 table data
-- **Completely streamlined**: Only includes fields actually needed by trampoline creation
-- **Memory efficient**: ~50% reduction in memory usage compared to full HDE64 structures
-- **Performance optimized**: Specialized for hook-critical instruction patterns
+```
+[Prefixes] [REX] [Opcode] [ModR/M] [SIB] [Displacement] [Immediate]
+   0-4      0-1    1-3      0-1     0-1      0-8          0-8
+```
 
-### HookInstruction Structure
+**Components:**
+
+- **Prefixes**: Operation size, segment, repeat behavior overrides
+- **REX Prefix**: 64-bit extensions for registers and operand size
+- **Opcode**: 1-3 bytes defining the instruction operation
+- **ModR/M**: Addressing mode and register selection
+- **SIB**: Scale-Index-Base for complex memory addressing
+- **Displacement**: Memory offset values (8/16/32-bit)
+- **Immediate**: Constant operand data (8/16/32/64-bit)
+
+### Hook-Critical Instructions
+
+**RIP-Relative Addressing:**
+
+```asm
+mov rax, [rip + 0x12345678]  ; Requires address relocation in trampolines
+lea rax, [rip + 0x1000]      ; PC-relative memory references
+call [rip + offset]          ; Indirect calls through memory
+```
+
+**Control Flow Instructions:**
+
+```asm
+call relative_addr           ; Direct relative calls
+jmp short_offset            ; Short jumps (8-bit offset)
+jcc long_offset             ; Conditional jumps (32-bit offset)
+ret                         ; Return instructions
+```
+
+**Complex Addressing:**
+
+```asm
+mov rax, [rbp + rsi*2 + 8]  ; Scale-index-base with displacement
+mov [rsp + 0x100], rbx      ; Stack operations with large offsets
+```
+
+### Decoder Features
+
+MinHook-rs provides a specialized decoder optimized for hooking:
 
 ```rust
 pub struct HookInstruction {
-    pub len: u8,           // Instruction length (absolutely accurate)
+    pub len: u8,           // Precise instruction length
     pub opcode: u8,        // Primary opcode
     pub opcode2: u8,       // Secondary opcode (0F xx instructions)
-    pub modrm: u8,         // ModR/M byte
-    pub immediate: i32,    // Immediate value (unified type)
-    pub displacement: i32, // Displacement value (for RIP-relative)
-    pub flags: u32,        // HDE64-compatible flags
+    pub modrm: u8,         // ModR/M byte for addressing analysis
+    pub immediate: i32,    // Immediate values (unified type)
+    pub displacement: i32, // Displacement for RIP-relative addressing
+    pub flags: u32,        // HDE64-compatible instruction flags
     pub error: bool,       // Parse error indicator
 }
 ```
 
-### Hook-Critical Features
+**Key Methods:**
 
-#### RIP-Relative Addressing Detection
+- `is_rip_relative()` - Detect instructions requiring address relocation
+- `is_call()`, `is_jmp()`, `is_conditional()` - Control flow classification
+- `immediate_size()` - Calculate immediate field length for relocation
+- `modrm_reg()` - Extract register fields for indirect jump detection
 
-```rust
-// Detect RIP-relative addressing (ModR/M = 00???101)
-if inst.is_rip_relative() {
-    // Handle address relocation for trampoline
-}
-```
+### HDE64 Compatibility
 
-#### Immediate Field Length Calculation
+The decoder maintains full compatibility with the proven HDE64 algorithm:
 
-```rust
-// Calculate immediate field total length for RIP relocation
-let imm_size = inst.immediate_size(); // Used by trampoline.c:115
-```
-
-#### Comprehensive Instruction Classification
-
-```rust
-if inst.is_call() { /* Handle CALL instructions */ }
-if inst.is_jmp() { /* Handle JMP instructions */ }
-if inst.is_conditional() { /* Handle conditional jumps (including 0F 8x) */ }
-if inst.is_ret() { /* Handle return instructions */ }
-if inst.is_indirect_jmp() { /* Handle indirect jumps */ }
-```
-
-### Instruction Encoding Format
-
-```
-[Prefixes] [REX] [Opcode] [ModR/M] [SIB] [Displacement] [Immediate]
-  0-4 bytes 0-1   1-3      0-1      0-1    0-8          0-8
-```
-
-### REX Prefix (x64 Extension)
-
-```
-0100 WRXB
-     ││││
-     │││└─ B: Extend base/rm register
-     ││└── X: Extend SIB index register  
-     │└─── R: Extend ModR/M reg field
-     └──── W: 64-bit operand size
-```
-
-### ModR/M Byte Structure
-
-```
-  7 6   5 4 3   2 1 0
-┌─────┬───────┬───────┐
-│ mod │  reg  │  rm   │
-└─────┴───────┴───────┘
-```
-
-| mod | Meaning | Example |
-|-----|---------|---------|
-| 00  | `[reg]` or `[RIP+disp32]` (when rm=101) | `[RAX]`, `[RIP+1234h]` |
-| 01  | `[reg+disp8]` | `[RAX+12h]` |
-| 10  | `[reg+disp32]` | `[RAX+12345678h]` |
-| 11  | Direct register | `RAX` |
-
-### Hook-Critical Instructions
-
-#### RIP-Relative Addressing (`ModR/M = 00???101`)
-
-```assembly
-8B 05 12 34 56 78   ; MOV EAX, [RIP+12345678h]
-```
-
-**Hook challenge**: After copying to trampoline, RIP changes, breaking address calculation.
-**Solution**: Recalculate displacement for new RIP location.
-
-#### Relative Jumps and Calls
-
-```assembly
-E8 xx xx xx xx      ; CALL rel32    → Convert to absolute CALL
-E9 xx xx xx xx      ; JMP rel32     → Convert to absolute JMP  
-EB xx               ; JMP rel8      → Convert to absolute JMP
-7x xx               ; Jcc rel8      → Convert to absolute conditional
-0F 8x xx xx xx xx   ; Jcc rel32     → Convert to absolute conditional
-```
-
-### Trampoline Generation Process
-
-1. **Decode**: Parse instructions using our optimized decoder
-2. **Copy**: Regular instructions copied unchanged
-3. **Relocate**: Fix RIP-relative addresses for new location using precise displacement calculation
-4. **Convert**: Transform relative jumps/calls to absolute form
-5. **Link**: Add final jump back to original function continuation
-
-#### Example Transformation
-
-Original function:
-
-```assembly
-48 83 EC 78         ; SUB RSP, 78h               (regular)
-8B 05 12 34 56 78   ; MOV EAX, [RIP+12345678h]   (RIP-relative)
-E8 AB CD EF 12      ; CALL rel32                 (relative call)
-```
-
-Generated trampoline:
-
-```assembly
-48 83 EC 78         ; SUB RSP, 78h               (copied unchanged)
-8B 05 xx xx xx xx   ; MOV EAX, [RIP+xxxxxxxx]    (displacement fixed)
-FF 15 02 00 00 00   ; CALL [RIP+8]               (absolute call)
-EB 08               ; JMP +8
-xx xx xx xx xx xx xx xx ; Call target address
-FF 25 00 00 00 00   ; JMP [RIP+6]                (return to original)
-yy yy yy yy yy yy yy yy ; Return address
-```
-
-### Decoder Accuracy Verification
-
-Our decoder has been extensively tested against the original HDE64:
-
-- **Instruction length**: 100% accuracy on 10,000+ test cases
-- **Flag compatibility**: Complete HDE64 flag system support  
-- **Edge cases**: Proper handling of complex instruction patterns
-- **Performance**: Optimized table lookup with safe boundary checking
+- **Table-driven approach**: Uses comprehensive opcode lookup tables
+- **Multi-stage parsing**: Prefix → REX → Opcode → ModR/M → Operands
+- **Error handling**: Graceful handling of malformed instructions
+- **Length accuracy**: 100% accurate instruction length calculation
 
 ## API Reference
 
@@ -319,13 +253,6 @@ Our decoder has been extensively tested against the original HDE64:
 | `queue_disable_hook(target)` | Queue hook for disable |
 | `apply_queued()` | Apply all queued operations |
 
-### Utility Functions
-
-| Function | Description |
-|----------|-------------|
-| `is_supported()` | Check if current platform is supported |
-| `status_to_string(error)` | Convert error to string description |
-
 ### Disassembler API
 
 | Function | Description |
@@ -333,9 +260,16 @@ Our decoder has been extensively tested against the original HDE64:
 | `decode_instruction(code)` | Decode a single instruction |
 | `can_hook_safely(code, len)` | Check if code region can be safely hooked |
 
+### Utility Functions
+
+| Function | Description |
+|----------|-------------|
+| `is_supported()` | Check if current platform is supported |
+| `status_to_string(error)` | Convert error to string description |
+
 ## Error Handling
 
-MinHook-rs provides comprehensive error handling through the `HookError` enum:
+MinHook-rs provides comprehensive error handling:
 
 ```rust
 pub enum HookError {
@@ -355,27 +289,6 @@ pub enum HookError {
 }
 ```
 
-## Platform Support
-
-- **Windows x64**: ✅ Full support
-- **Windows x86**: ❌ Not supported  
-- **Linux/macOS**: ❌ Windows-specific
-
-## Performance
-
-MinHook-rs is designed for production use with:
-
-- **Minimal overhead**: Optimized instruction decoding with ~50% memory reduction
-- **Efficient memory usage**: Small trampoline footprint  
-- **Fast execution**: Direct assembly jumps, no interpreter
-- **Thread safety**: Lock-free operations where possible
-
-Benchmarks show performance equivalent to or better than the original MinHook library:
-
-- **Decode speed**: 1000 instructions decoded in ~1.5ms
-- **Hook creation**: Sub-millisecond trampoline generation
-- **Runtime overhead**: Near-zero impact on hooked function performance
-
 ## Architecture
 
 MinHook-rs works by patching target functions and redirecting execution:
@@ -385,47 +298,66 @@ Original: [Target Function] → [Function Body] → [Return]
 Hooked:   [Target Function] → [Hook Function] → [Trampoline] → [Original Body] → [Return]
 ```
 
-The trampoline preserves the original function's behavior while allowing interception.
+**Hook Installation Process:**
+
+1. **Analysis**: Decode instructions at target address for safe hook points
+2. **Trampoline**: Allocate nearby memory and copy original instructions
+3. **Relocation**: Fix RIP-relative addresses for new trampoline location
+4. **Installation**: Replace target function start with jump to detour
+5. **Execution**: Detour function calls original via trampoline
+
+## Platform Support
+
+- **Windows x64**: Full support
+- **Windows x86**: Not supported  
+- **Linux/macOS**: Windows-specific
+
+## Performance
+
+MinHook-rs is optimized for production use:
+
+- **Low overhead**: Minimal impact on hooked function performance
+- **Fast decoding**: Optimized instruction parsing with table lookups
+- **Memory efficient**: Small trampoline footprint and optimized data structures
+- **Thread safety**: Lock-free operations where possible
+
+Benchmarks show excellent performance characteristics:
+
+- **Hook creation**: Sub-millisecond trampoline generation
+- **Runtime overhead**: Near-zero impact on function execution
+- **Memory usage**: Minimal footprint with efficient instruction decoding
 
 ## Best Practices
 
-### 1. Initialization
+### Hook Function Design
 
 ```rust
-// Always initialize before any hook operations
-initialize()?;
-```
+// Always match the exact signature of the target function
+type TargetFn = unsafe extern "system" fn(arg1: Type1, arg2: Type2) -> RetType;
+static mut ORIGINAL: Option<TargetFn> = None;
 
-### 2. Hook Management
-
-```rust
-// Store original function pointers safely using ptr::addr_of!
-static mut ORIGINAL: Option<FnType> = None;
-
-unsafe {
-    ORIGINAL = Some(std::mem::transmute(trampoline));
-}
-
-// Access safely in hook functions
-unsafe {
+unsafe extern "system" fn hook_function(arg1: Type1, arg2: Type2) -> RetType {
+    // Your hook logic here
+    
+    // Call original function safely
     let original = ptr::addr_of!(ORIGINAL).read().unwrap();
-    original(args...)
+    original(arg1, arg2)
 }
 ```
 
-### 3. Error Handling
+### Error Handling
 
 ```rust
-// Handle all possible errors
+// Handle all possible error conditions
 match create_hook_api("user32", "MessageBoxA", hook_fn as *mut c_void) {
     Ok((trampoline, target)) => { /* success */ },
-    Err(HookError::ModuleNotFound) => { /* module not loaded */ },
-    Err(HookError::FunctionNotFound) => { /* function not exported */ },
-    Err(e) => { /* other errors */ },
+    Err(HookError::ModuleNotFound) => { /* handle missing module */ },
+    Err(HookError::FunctionNotFound) => { /* handle missing function */ },
+    Err(e) => { /* handle other errors */ },
 }
 ```
 
-### 4. Cleanup
+### Cleanup
 
 ```rust
 // Always cleanup in reverse order
@@ -433,45 +365,6 @@ disable_hook(target)?;
 remove_hook(target)?;
 uninitialize()?;
 ```
-
-### 5. Testing and Validation
-
-```rust
-// Use comprehensive testing for production code
-fn test_hook_functionality() -> Result<()> {
-    // Test basic hook creation
-    let (trampoline, target) = create_hook_api("kernel32", "GetTickCount", hook_fn)?;
-    
-    // Test enable/disable cycles
-    for _ in 0..10 {
-        enable_hook(target)?;
-        disable_hook(target)?;
-    }
-    
-    // Test error conditions
-    assert!(matches!(enable_hook(target), Err(HookError::Disabled)));
-    
-    remove_hook(target)?;
-    Ok(())
-}
-```
-
-## Version History
-
-### v1.1.0
-
-- **Enhanced instruction decoder**: Custom x64 disassembler optimized for hooks
-- **Improved memory efficiency**: 50% reduction in decoder memory usage
-- **Extended test coverage**: Comprehensive example with 12 test phases
-- **Better error handling**: Enhanced edge case detection
-- **Performance optimizations**: Faster instruction parsing and validation
-
-### v1.0.0
-
-- Initial release with core MinHook functionality
-- Basic instruction decoding using simplified HDE64 port
-- Complete API compatibility with original MinHook
-- Thread-safe operations and comprehensive error handling
 
 ## License
 
@@ -481,16 +374,5 @@ MIT License - see [LICENSE](LICENSE) file.
 
 - Original [MinHook](https://github.com/TsudaKageyu/minhook) by Tsuda Kageyu
 - [HDE64](https://github.com/Cerbersec/HDE64) disassembler engine by Vyacheslav Patkov
-- Intel x86-64 Architecture documentation
+- Intel x86-64 Architecture Software Developer's Manual
 - Microsoft Windows API documentation
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
-
-Areas of particular interest:
-
-- Additional example scenarios and use cases
-- Performance optimizations and benchmarks
-- Extended platform support (Windows ARM64)
-- Documentation improvements and tutorials

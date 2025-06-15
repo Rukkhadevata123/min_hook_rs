@@ -3,6 +3,26 @@ name = "min_hook_rs"
 version = "1.2.0"
 edition = "2024"
 license = "MIT"
+authors = ["Rukkhadevata123 <3083913301@qq.com>"]
+description = "A Rust implementation of MinHook library for Windows x64 function hooking with enhanced precision instruction decoding"
+documentation = "https://docs.rs/min_hook_rs"
+homepage = "https://github.com/Rukkhadevata123/min_hook_rs"
+repository = "https://github.com/Rukkhadevata123/min_hook_rs"
+readme = "README.md"
+keywords = ["hook", "windows", "x64", "function", "detour"]
+categories = ["os::windows-apis", "development-tools", "api-bindings"]
+exclude = [
+    "minhook/",
+    ".github/",
+    "*.exe",
+    "*.dll",
+    "target/",
+    ".vscode/",
+    "Cargo.lock",
+    "gs_bilibili/",
+    "fpsunlock/"
+]
+
 
 [dependencies.windows-sys]
 version = "0.60"
