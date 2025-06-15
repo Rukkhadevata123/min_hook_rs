@@ -63,7 +63,6 @@ impl HookInstruction {
         self.error || (self.flags & F_ERROR) != 0
     }
 
-    // Keep original helper methods...
     #[inline]
     pub fn is_call(&self) -> bool {
         self.opcode == 0xE8
@@ -109,24 +108,27 @@ pub const F_ERROR_LENGTH: u32 = 0x00004000;
 pub const F_ERROR_LOCK: u32 = 0x00008000;
 pub const F_ERROR_OPERAND: u32 = 0x00010000;
 
-// HDE64 table constants
+// HDE64 table constants - exactly as in the original
 const C_MODRM: u8 = 0x01;
 const C_IMM8: u8 = 0x02;
 const C_IMM16: u8 = 0x04;
 const C_IMM_P66: u8 = 0x10;
 const C_REL8: u8 = 0x20;
 const C_REL32: u8 = 0x40;
+const C_GROUP: u8 = 0x80;
 const C_ERROR: u8 = 0xff;
 
+// Prefix constants
 const PRE_NONE: u8 = 0x01;
 const PRE_F2: u8 = 0x02;
 const PRE_F3: u8 = 0x04;
 const PRE_66: u8 = 0x08;
 const PRE_67: u8 = 0x10;
 
+// Table offsets - exactly as in the original table64.h
 const DELTA_OPCODES: usize = 0x4a;
 
-// HDE64 original table data
+// Complete HDE64 table data - copied directly from table64.h
 static HDE64_TABLE: &[u8] = &[
     0xa5, 0xaa, 0xa5, 0xb8, 0xa5, 0xaa, 0xa5, 0xaa, 0xa5, 0xb8, 0xa5, 0xb8, 0xa5, 0xb8, 0xa5, 0xb8,
     0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xac, 0xc0, 0xcc, 0xc0, 0xa1, 0xa1, 0xa1, 0xa1,
@@ -164,10 +166,9 @@ static HDE64_TABLE: &[u8] = &[
     0x00,
 ];
 
-/// Main decode function - fully follows hde64.c logic, absolutely precise
+/// Main instruction decoder function - based on hde64.c
 pub fn decode_instruction(code: &[u8]) -> HookInstruction {
     let mut inst = HookInstruction::default();
-
     if code.is_empty() {
         inst.error = true;
         inst.flags = F_ERROR | F_ERROR_LENGTH;
@@ -175,32 +176,48 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
     }
 
     let mut pos = 0;
-
-    // Step 1: Prefix handling (streamlined but retains important info)
     let pref = parse_prefixes(code, &mut pos);
+
     if pos >= code.len() {
         inst.error = true;
         inst.flags = F_ERROR | F_ERROR_LENGTH;
+        inst.len = 15;
         return inst;
     }
 
-    // Step 2: Opcode parsing (fully follows hde64.c)
-    inst.opcode = code[pos];
+    // REX prefix handling
+    let mut c = code[pos];
+    if (c & 0xf0) == 0x40 {
+        pos += 1;
+        if pos >= code.len() || (code[pos] & 0xf0) == 0x40 {
+            inst.error = true;
+            inst.flags = F_ERROR | F_ERROR_LENGTH;
+            inst.len = 15;
+            return inst;
+        }
+        c = code[pos];
+    }
+
+    // Primary opcode
+    inst.opcode = c;
     pos += 1;
 
-    let mut ht_offset = 0;
-    if inst.opcode == 0x0F {
+    // Handle 0F prefix (two-byte opcodes)
+    let ht_offset = if inst.opcode == 0x0F {
         if pos >= code.len() {
             inst.error = true;
             inst.flags = F_ERROR | F_ERROR_LENGTH;
+            inst.len = 15;
             return inst;
         }
         inst.opcode2 = code[pos];
         pos += 1;
-        ht_offset = DELTA_OPCODES;
-    }
+        DELTA_OPCODES
+    } else {
+        0
+    };
 
-    // Step 3: Table lookup
+    // Table lookup
     let opcode = if inst.opcode2 != 0 {
         inst.opcode2
     } else {
@@ -211,14 +228,16 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
     if cflags == C_ERROR {
         inst.error = true;
         inst.flags = F_ERROR | F_ERROR_OPCODE;
+        inst.len = 15;
         return inst;
     }
 
-    // Step 4: ModR/M handling
+    // ModR/M byte handling
     if (cflags & C_MODRM) != 0 {
         if pos >= code.len() {
             inst.error = true;
             inst.flags = F_ERROR | F_ERROR_LENGTH;
+            inst.len = 15;
             return inst;
         }
 
@@ -226,13 +245,13 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
         inst.modrm = code[pos];
         pos += 1;
 
-        // Parse addressing mode
         let (additional_bytes, displacement, disp_flags) =
             parse_addressing(code, pos, inst.modrm, (pref & PRE_67) != 0);
 
         if additional_bytes == u8::MAX {
             inst.error = true;
             inst.flags = F_ERROR | F_ERROR_LENGTH;
+            inst.len = 15;
             return inst;
         }
 
@@ -241,12 +260,12 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
         pos += additional_bytes as usize;
     }
 
-    // Step 5: Immediate handling (fully follows HDE64 logic)
+    // Immediate value handling
     let (imm_size, imm_value, imm_flags) = parse_immediate(code, pos, cflags, (pref & PRE_66) != 0);
-
     if imm_size == u8::MAX {
         inst.error = true;
         inst.flags = F_ERROR | F_ERROR_LENGTH;
+        inst.len = 15;
         return inst;
     }
 
@@ -264,52 +283,59 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
     inst
 }
 
-/// HDE64 table lookup
+/// HDE64 table lookup - maintains the exact same logic as hde64.c
 fn get_instruction_flags(opcode: u8, ht_offset: usize) -> u8 {
     if ht_offset >= HDE64_TABLE.len() {
         return C_ERROR;
     }
 
-    let table_remaining = HDE64_TABLE.len() - ht_offset;
-    if (opcode / 4) as usize >= table_remaining {
+    let idx1_pos = ht_offset + (opcode / 4) as usize;
+    if idx1_pos >= HDE64_TABLE.len() {
         return C_ERROR;
     }
 
-    unsafe {
-        let ht = HDE64_TABLE.as_ptr().add(ht_offset);
-        let idx = *ht.add((opcode / 4) as usize);
+    let idx1 = HDE64_TABLE[idx1_pos];
+    let final_pos = ht_offset + idx1 as usize + (opcode % 4) as usize;
+    if final_pos >= HDE64_TABLE.len() {
+        return C_ERROR;
+    }
 
-        let final_offset = ht_offset + idx as usize + (opcode % 4) as usize;
-        if final_offset >= HDE64_TABLE.len() {
+    let mut cflags = HDE64_TABLE[final_pos];
+
+    // Handle GROUP instructions
+    if (cflags & C_GROUP) != 0 {
+        let group_offset = ht_offset + (cflags & 0x7f) as usize;
+        if group_offset + 1 < HDE64_TABLE.len() {
+            let group_data =
+                u16::from_le_bytes([HDE64_TABLE[group_offset], HDE64_TABLE[group_offset + 1]]);
+            cflags = (group_data & 0xFF) as u8;
+        } else {
             return C_ERROR;
         }
-
-        HDE64_TABLE[final_offset]
     }
+
+    cflags
 }
 
-/// Prefix parsing
+/// Parse instruction prefixes - based on hde64.c:28-50
 fn parse_prefixes(code: &[u8], pos: &mut usize) -> u8 {
     let mut pref = 0u8;
-    let mut count = 0;
 
-    while *pos < code.len() && count < 16 {
+    // Match C code: for (x = 16; x; x--) switch (c = *p++)
+    for _ in 0..16 {
+        if *pos >= code.len() {
+            break;
+        }
+
         match code[*pos] {
             0x66 => pref |= PRE_66,
             0x67 => pref |= PRE_67,
             0xf2 => pref |= PRE_F2,
             0xf3 => pref |= PRE_F3,
-            0x40..=0x4F => {
-                *pos += 1;
-                break; // REX prefix ends
-            }
-            0xF0 | 0x26 | 0x2E | 0x36 | 0x3E | 0x64 | 0x65 => {
-                // Other prefixes, skip
-            }
-            _ => break,
+            0xf0 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 => {} // Other prefixes, ignored
+            _ => break,                                          // Stop at non-prefix byte
         }
         *pos += 1;
-        count += 1;
     }
 
     if pref == 0 {
@@ -319,61 +345,67 @@ fn parse_prefixes(code: &[u8], pos: &mut usize) -> u8 {
     pref
 }
 
-/// Addressing mode parsing
+/// Parse addressing mode - based on hde64.c:156-195
 fn parse_addressing(code: &[u8], pos: usize, modrm: u8, has_67: bool) -> (u8, i32, u32) {
     let m_mod = modrm >> 6;
     let m_rm = modrm & 7;
+
+    // Register mode - return immediately
+    if m_mod == 3 {
+        return (0, 0, 0);
+    }
+
     let mut bytes_used = 0;
     let mut displacement = 0;
-    let mut disp_size = 0u8;
     let mut flags = 0u32;
 
-    // SIB byte handling (fully follows hde64.c)
+    // Calculate displacement size - based on hde64.c:156-168
+    let mut disp_size = match m_mod {
+        0 => {
+            if has_67 && m_rm == 6 {
+                2
+            } else if !has_67 && m_rm == 5 {
+                4
+            }
+            // RIP-relative
+            else {
+                0
+            }
+        }
+        1 => 1,
+        2 => {
+            if has_67 {
+                2
+            } else {
+                4
+            }
+        }
+        _ => 0,
+    };
+
+    // SIB byte handling - based on hde64.c:169-176
     if m_mod != 3 && m_rm == 4 {
-        if pos >= code.len() {
+        if pos + bytes_used >= code.len() {
             return (u8::MAX, 0, 0);
         }
+
         flags |= F_SIB;
+        let sib = code[pos + bytes_used];
         bytes_used += 1;
 
-        let sib = code[pos];
+        // SIB base special case
         if (sib & 7) == 5 && (m_mod & 1) == 0 {
             disp_size = 4;
         }
     }
 
-    // Displacement size calculation
-    if disp_size == 0 {
-        disp_size = match m_mod {
-            0 => {
-                if has_67 {
-                    if m_rm == 6 { 2 } else { 0 }
-                } else if m_rm == 5 {
-                    4
-                } else {
-                    0
-                }
-            }
-            1 => 1,
-            2 => {
-                if has_67 {
-                    2
-                } else {
-                    4
-                }
-            }
-            3 => 0,
-            _ => 0,
-        };
-    }
-
-    // Read displacement and set corresponding flags
+    // Read displacement - based on hde64.c:178-191
     if disp_size > 0 {
-        if pos + bytes_used as usize + disp_size as usize > code.len() {
+        if pos + bytes_used + disp_size > code.len() {
             return (u8::MAX, 0, 0);
         }
 
-        let disp_pos = pos + bytes_used as usize;
+        let disp_pos = pos + bytes_used;
         displacement = match disp_size {
             1 => {
                 flags |= F_DISP8;
@@ -397,47 +429,44 @@ fn parse_addressing(code: &[u8], pos: usize, modrm: u8, has_67: bool) -> (u8, i3
         bytes_used += disp_size;
     }
 
-    (bytes_used, displacement, flags)
+    (bytes_used as u8, displacement, flags)
 }
 
-/// Immediate parsing
+/// Parse immediate values - based on hde64.c:199-246
 fn parse_immediate(code: &[u8], pos: usize, cflags: u8, has_66: bool) -> (u8, i32, u32) {
     let mut imm_size = 0u8;
     let mut imm_value = 0i32;
     let mut flags = 0u32;
 
-    // C_IMM_P66 handling (follows hde64.c logic)
+    // C_IMM_P66 handling - based on hde64.c:199-217
     if (cflags & C_IMM_P66) != 0 {
-        if has_66 {
+        if (cflags & C_REL32) != 0 && has_66 {
+            // 16-bit relative jump
+            flags |= F_IMM16 | F_RELATIVE;
+            imm_size = 2;
+        } else if (cflags & C_REL32) == 0 && has_66 {
+            // 16-bit immediate
             flags |= F_IMM16;
             imm_size = 2;
         } else {
+            // 32-bit immediate or relative jump
             flags |= F_IMM32;
+            if (cflags & C_REL32) != 0 {
+                flags |= F_RELATIVE;
+            }
             imm_size = 4;
         }
     }
 
-    // C_IMM16 handling
+    // Other immediate types - based on hde64.c:219-246
     if (cflags & C_IMM16) != 0 {
         flags |= F_IMM16;
         imm_size += 2;
     }
-
-    // C_IMM8 handling
     if (cflags & C_IMM8) != 0 {
         flags |= F_IMM8;
         imm_size += 1;
     }
-
-    // C_REL32 handling
-    if (cflags & C_REL32) != 0 {
-        flags |= F_IMM32 | F_RELATIVE;
-        if (cflags & C_IMM_P66) == 0 {
-            imm_size += 4;
-        }
-    }
-
-    // C_REL8 handling
     if (cflags & C_REL8) != 0 {
         flags |= F_IMM8 | F_RELATIVE;
         imm_size += 1;
@@ -449,22 +478,14 @@ fn parse_immediate(code: &[u8], pos: usize, cflags: u8, has_66: bool) -> (u8, i3
             return (u8::MAX, 0, 0);
         }
 
-        // Read by priority (prioritize relative jumps)
-        let read_size = if (cflags & C_REL32) != 0 && (cflags & C_IMM_P66) == 0 {
-            4
-        } else if (cflags & C_REL8) != 0 {
-            1
-        } else if (cflags & C_IMM_P66) != 0 {
-            if has_66 { 2 } else { 4 }
-        } else if (cflags & C_IMM16) != 0 {
-            2
-        } else {
-            1 // Simplified same branch
-        };
-
-        imm_value = match read_size {
+        // Always read the primary immediate value
+        imm_value = match imm_size {
             1 => code[pos] as i8 as i32,
             2 => i16::from_le_bytes([code[pos], code[pos + 1]]) as i32,
+            3 => {
+                // IMM16 + IMM8 combination
+                i16::from_le_bytes([code[pos], code[pos + 1]]) as i32
+            }
             4 => i32::from_le_bytes([code[pos], code[pos + 1], code[pos + 2], code[pos + 3]]),
             _ => 0,
         };
@@ -473,7 +494,7 @@ fn parse_immediate(code: &[u8], pos: usize, cflags: u8, has_66: bool) -> (u8, i3
     (imm_size, imm_value, flags)
 }
 
-/// Hook safety check
+/// Check if hook can be safely installed at the given address
 pub fn can_hook_safely(code: &[u8], required_length: usize) -> bool {
     if code.len() < required_length {
         return false;
@@ -489,7 +510,7 @@ pub fn can_hook_safely(code: &[u8], required_length: usize) -> bool {
             return false;
         }
 
-        // Check RET
+        // Check RET instruction
         if inst.is_ret() && total_len < required_length {
             return false;
         }

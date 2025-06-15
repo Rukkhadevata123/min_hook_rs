@@ -110,7 +110,7 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         else if inst.is_rip_relative() {
             // Copy instruction to buffer and modify RIP-relative address
             unsafe {
-                // 使用 ptr::copy_nonoverlapping 替代循环
+                // Use ptr::copy_nonoverlapping instead of loop
                 ptr::copy_nonoverlapping(
                     old_inst_addr as *const u8,
                     inst_buf.as_mut_ptr(),
