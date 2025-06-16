@@ -90,14 +90,12 @@ unsafe extern "system" fn thread_proc(_: *mut c_void) -> u32 {
         (*ipc_data).status = IpcStatus::ClientReady as i32;
 
         // FPS写入循环（对照C++的while循环）
-        while (*ipc_data).status != IpcStatus::HostExit as i32 {
-            let target_fps = (*ipc_data).value;
+        // 告诉编译器这是可能被外部修改的内存
+        while ptr::read_volatile(&(*ipc_data).status) != IpcStatus::HostExit as i32 {
+            let target_fps = ptr::read_volatile(&(*ipc_data).value);
             let clamped_fps = clamp(target_fps, 1, 1000);
-
-            // 直接写入FPS值
             *fps_addr = clamped_fps;
-
-            Sleep(62); // 对照C++的Sleep(62)，约16Hz更新频率
+            Sleep(62);
         }
 
         // 通知主程序即将退出
@@ -123,7 +121,7 @@ pub unsafe extern "system" fn DllMain(
         }
 
         // 检查是否在游戏进程中（对照C++ GetModuleHandleA("mhypbase.dll")）
-        if GetModuleHandleA(b"mhypbase.dll\0".as_ptr()).is_null() {
+        if GetModuleHandleA(c"mhypbase.dll".as_ptr() as *const u8).is_null() {
             return 1; // 不是游戏进程，安全退出
         }
 

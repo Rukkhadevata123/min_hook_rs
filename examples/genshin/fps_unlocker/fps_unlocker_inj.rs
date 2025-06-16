@@ -69,7 +69,7 @@ fn launch_game(game_path: &str) -> Result<(HANDLE, u32, HANDLE), String> {
             CREATE_SUSPENDED,
             ptr::null(),
             work_dir_wide.as_ptr(),
-            &mut si,
+            &si,
             &mut pi,
         ) == 0
         {
@@ -335,10 +335,10 @@ fn wait_for_game_window(process_id: u32, process_handle: HANDLE) -> Result<HWND,
         unsafe {
             // 修复：使用 u32 而不是 i32
             let mut exit_code = STILL_ACTIVE as u32;
-            if GetExitCodeProcess(process_handle, &mut exit_code) != 0 {
-                if exit_code != STILL_ACTIVE as u32 {
-                    return Err("Game process exited while waiting for window".to_string());
-                }
+            if GetExitCodeProcess(process_handle, &mut exit_code) != 0
+                && exit_code != STILL_ACTIVE as u32
+            {
+                return Err("Game process exited while waiting for window".to_string());
             }
 
             let mut context = WindowSearchContext {
@@ -410,7 +410,7 @@ fn inject_dll_with_hook(
         }
 
         // 2. 获取WndProc函数地址
-        let stub_wnd_proc = GetProcAddress(stub_module, b"WndProc\0".as_ptr());
+        let stub_wnd_proc = GetProcAddress(stub_module, c"WndProc".as_ptr() as *const u8);
         if stub_wnd_proc.is_none() {
             FreeLibrary(stub_module);
             return Err("Failed to get WndProc address".to_string());
@@ -431,7 +431,10 @@ fn inject_dll_with_hook(
         // 5. 设置窗口钩子
         let wnd_hook = SetWindowsHookExW(
             WH_GETMESSAGE,
-            Some(std::mem::transmute(stub_wnd_proc.unwrap())),
+            Some(std::mem::transmute::<
+                unsafe extern "system" fn() -> isize,
+                unsafe extern "system" fn(i32, usize, isize) -> isize,
+            >(stub_wnd_proc.unwrap())),
             stub_module,
             thread_id,
         );
@@ -478,12 +481,12 @@ fn monitor_ipc(
         loop {
             // 修复：使用 u32 而不是 i32
             let mut exit_code = STILL_ACTIVE as u32;
-            if GetExitCodeProcess(process_handle, &mut exit_code) != 0 {
-                if exit_code != STILL_ACTIVE as u32 {
-                    println!("Game process exited during DLL initialization");
-                    UnmapViewOfFile(view);
-                    return Ok(()); // 正常退出
-                }
+            if GetExitCodeProcess(process_handle, &mut exit_code) != 0
+                && exit_code != STILL_ACTIVE as u32
+            {
+                println!("Game process exited during DLL initialization");
+                UnmapViewOfFile(view);
+                return Ok(()); // 正常退出
             }
 
             let status = (*ipc_data).status;
@@ -510,11 +513,11 @@ fn monitor_ipc(
         loop {
             // 修复：使用 u32 而不是 i32
             let mut exit_code = STILL_ACTIVE as u32;
-            if GetExitCodeProcess(process_handle, &mut exit_code) != 0 {
-                if exit_code != STILL_ACTIVE as u32 {
-                    println!("Game process exited (exit code: {})", exit_code);
-                    break;
-                }
+            if GetExitCodeProcess(process_handle, &mut exit_code) != 0
+                && exit_code != STILL_ACTIVE as u32
+            {
+                println!("Game process exited (exit code: {})", exit_code);
+                break;
             }
 
             (*ipc_data).value = target_fps;
@@ -561,9 +564,9 @@ fn main() {
     let game_path = &args[1];
     let dll_path = &args[2];
     let target_fps = match args[3].parse::<i32>() {
-        Ok(f) if f >= 30 && f <= 1000 => f,
+        Ok(f) if (60..=240).contains(&f) => f,
         _ => {
-            eprintln!("Error: FPS must be between 30-1000");
+            eprintln!("Error: FPS must be between 60-240");
             return;
         }
     };

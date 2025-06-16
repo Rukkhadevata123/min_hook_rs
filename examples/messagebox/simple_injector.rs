@@ -66,8 +66,8 @@ fn inject_dll(process_id: u32, dll_path: &str) -> Result<(), String> {
         }
 
         // Get LoadLibraryA address
-        let kernel32 = GetModuleHandleA("kernel32\0".as_ptr());
-        let load_library = GetProcAddress(kernel32, "LoadLibraryA\0".as_ptr());
+        let kernel32 = GetModuleHandleA(c"kernel32".as_ptr() as *const u8);
+        let load_library = GetProcAddress(kernel32, c"LoadLibraryA".as_ptr() as *const u8);
 
         if load_library.is_none() {
             VirtualFreeEx(process, mem, 0, MEM_RELEASE);
@@ -80,7 +80,10 @@ fn inject_dll(process_id: u32, dll_path: &str) -> Result<(), String> {
             process,
             ptr::null(),
             0,
-            Some(std::mem::transmute(load_library.unwrap())),
+            Some(std::mem::transmute::<
+                unsafe extern "system" fn() -> isize,
+                unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+            >(load_library.unwrap())),
             mem,
             0,
             ptr::null_mut(),

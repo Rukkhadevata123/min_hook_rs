@@ -190,7 +190,7 @@ fn launch_game(game_path: &str) -> Result<(HANDLE, u32), String> {
             0,
             std::ptr::null(),
             work_dir_wide.as_ptr(),
-            &mut si,
+            &si,
             &mut pi,
         ) == 0
         {
@@ -426,9 +426,9 @@ fn main() {
 
     let game_path = &args[1];
     let target_fps = match args[2].parse::<i32>() {
-        Ok(f) if f >= 30 && f <= 1000 => f,
+        Ok(f) if (60..=240).contains(&f) => f,
         _ => {
-            eprintln!("Error: FPS must be between 30-1000");
+            eprintln!("Error: FPS must be between 60-240");
             return;
         }
     };

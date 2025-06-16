@@ -74,7 +74,7 @@ unsafe extern "system" fn hooked_messagebox_w(
                     custom_caption.as_ptr(),
                     MB_YESNOCANCEL | MB_ICONQUESTION, // Keep the same button style
                 ),
-                None => IDCANCEL as i32, // Fixed: use IDCANCEL instead of MB_CANCEL
+                None => IDCANCEL, // Fixed: use IDCANCEL instead of MB_CANCEL
             }
         }
     } else {
@@ -134,7 +134,15 @@ unsafe fn install_hook() -> bool {
         match create_hook_api("user32", "MessageBoxW", hooked_messagebox_w as *mut c_void) {
             Ok((trampoline, target)) => {
                 // Store original function
-                ORIGINAL_MESSAGEBOX_W = Some(std::mem::transmute(trampoline));
+                ORIGINAL_MESSAGEBOX_W = Some(std::mem::transmute::<
+                    *mut std::ffi::c_void,
+                    unsafe extern "system" fn(
+                        *mut std::ffi::c_void,
+                        *const u16,
+                        *const u16,
+                        u32,
+                    ) -> i32,
+                >(trampoline));
 
                 // Enable hook
                 match enable_hook(target) {

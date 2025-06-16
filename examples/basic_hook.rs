@@ -102,8 +102,8 @@ pub unsafe extern "system" fn hooked_recursive_messagebox(
             Some(original_fn) => {
                 let result = original_fn(
                     hwnd,
-                    "Recursive Test\0".as_ptr(),
-                    "Recursion\0".as_ptr(),
+                    c"Recursive Test".as_ptr() as *const u8,
+                    c"Recursion".as_ptr() as *const u8,
                     utype,
                 );
                 println!(
@@ -150,8 +150,12 @@ fn test_multiple_hooks() -> Result<()> {
     )?;
 
     unsafe {
-        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute(trampoline1));
-        ORIGINAL_GETTICKCOUNT = Some(std::mem::transmute(trampoline2));
+        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute::<*mut c_void, MessageBoxAFn>(
+            trampoline1,
+        ));
+        ORIGINAL_GETTICKCOUNT = Some(std::mem::transmute::<*mut c_void, GetTickCountFn>(
+            trampoline2,
+        ));
         MESSAGEBOX_HOOK_COUNT = 0;
         GETTICKCOUNT_HOOK_COUNT = 0;
     }
@@ -218,7 +222,9 @@ fn test_dynamic_enable_disable() -> Result<()> {
     let (trampoline, target) =
         create_hook_api("user32", "MessageBoxA", hooked_messagebox as *mut c_void)?;
     unsafe {
-        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute(trampoline));
+        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute::<*mut c_void, MessageBoxAFn>(
+            trampoline,
+        ));
         MESSAGEBOX_HOOK_COUNT = 0;
     }
 
@@ -259,7 +265,9 @@ fn test_queued_operations() -> Result<()> {
     let (trampoline, target) =
         create_hook_api("user32", "MessageBoxA", hooked_messagebox as *mut c_void)?;
     unsafe {
-        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute(trampoline));
+        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute::<*mut c_void, MessageBoxAFn>(
+            trampoline,
+        ));
         MESSAGEBOX_HOOK_COUNT = 0;
     }
 
@@ -318,7 +326,9 @@ fn test_error_handling() -> Result<()> {
     let (trampoline, target) =
         create_hook_api("user32", "MessageBoxA", hooked_messagebox as *mut c_void)?;
     unsafe {
-        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute(trampoline));
+        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute::<*mut c_void, MessageBoxAFn>(
+            trampoline,
+        ));
     }
 
     enable_hook(target)?;
@@ -388,7 +398,9 @@ fn test_recursive_calls() -> Result<()> {
         hooked_recursive_messagebox as *mut c_void,
     )?;
     unsafe {
-        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute(trampoline));
+        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute::<*mut c_void, MessageBoxAFn>(
+            trampoline,
+        ));
     }
 
     enable_hook(target)?;
@@ -420,8 +432,12 @@ fn test_performance_stability() -> Result<()> {
     )?;
 
     unsafe {
-        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute(trampoline1));
-        ORIGINAL_GETTICKCOUNT = Some(std::mem::transmute(trampoline2));
+        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute::<*mut c_void, MessageBoxAFn>(
+            trampoline1,
+        ));
+        ORIGINAL_GETTICKCOUNT = Some(std::mem::transmute::<*mut c_void, GetTickCountFn>(
+            trampoline2,
+        ));
         MESSAGEBOX_HOOK_COUNT = 0;
         GETTICKCOUNT_HOOK_COUNT = 0;
     }
@@ -495,7 +511,9 @@ fn main() -> Result<()> {
         create_hook_api("user32", "MessageBoxA", hooked_messagebox as *mut c_void)?;
 
     unsafe {
-        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute(trampoline));
+        ORIGINAL_MESSAGEBOX = Some(std::mem::transmute::<*mut c_void, MessageBoxAFn>(
+            trampoline,
+        ));
         MESSAGEBOX_HOOK_COUNT = 0;
     }
 

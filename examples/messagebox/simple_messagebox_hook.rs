@@ -68,7 +68,10 @@ fn setup_hook() -> Result<()> {
 
     // Store original function pointer
     unsafe {
-        ORIGINAL_MESSAGEBOX_A = Some(std::mem::transmute(trampoline));
+        ORIGINAL_MESSAGEBOX_A = Some(std::mem::transmute::<
+            *mut std::ffi::c_void,
+            unsafe extern "system" fn(*mut std::ffi::c_void, *const i8, *const i8, u32) -> i32,
+        >(trampoline));
     }
 
     // Enable Hook

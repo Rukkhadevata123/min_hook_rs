@@ -88,14 +88,15 @@ fn inject_dll(process_id: u32, dll_path: &str) -> Result<()> {
         println!("DLL path written ({} bytes)", bytes_written);
 
         // Get LoadLibraryA address
-        let kernel32_handle = GetModuleHandleA("kernel32\0".as_ptr());
+        let kernel32_handle = GetModuleHandleA(c"kernel32".as_ptr() as *const u8);
         if kernel32_handle.is_null() {
             VirtualFreeEx(process_handle, remote_memory, 0, MEM_RELEASE);
             CloseHandle(process_handle);
             return Err("Failed to get kernel32 handle".into());
         }
 
-        let load_library_addr = GetProcAddress(kernel32_handle, "LoadLibraryA\0".as_ptr());
+        let load_library_addr =
+            GetProcAddress(kernel32_handle, c"LoadLibraryA".as_ptr() as *const u8);
         if load_library_addr.is_none() {
             VirtualFreeEx(process_handle, remote_memory, 0, MEM_RELEASE);
             CloseHandle(process_handle);
@@ -112,7 +113,10 @@ fn inject_dll(process_id: u32, dll_path: &str) -> Result<()> {
             process_handle,
             ptr::null(),
             0,
-            Some(std::mem::transmute(load_library_addr.unwrap())),
+            Some(std::mem::transmute::<
+                unsafe extern "system" fn() -> isize,
+                unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+            >(load_library_addr.unwrap())),
             remote_memory,
             0,
             ptr::null_mut(),
