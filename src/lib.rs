@@ -1,7 +1,7 @@
 //! # MinHook-rs
 //!
 //! A Rust implementation of MinHook library for Windows x64 function hooking.
-//! 
+//!
 //! This library provides a simple, thread-safe API for intercepting Win32 functions
 //! with precise instruction decoding and minimal overhead.
 //!
@@ -46,8 +46,8 @@
 //!
 //!     // Create hook by API name
 //!     let (trampoline, target) = create_hook_api(
-//!         "user32", 
-//!         "MessageBoxA", 
+//!         "user32",
+//!         "MessageBoxA",
 //!         hooked_messagebox as *mut c_void
 //!     )?;
 //!
@@ -241,7 +241,7 @@ pub use hook::{
 };
 
 // Re-export for advanced usage
-pub use disasm::{decode_instruction, can_hook_safely, HookInstruction};
+pub use disasm::{HookInstruction, can_hook_safely, decode_instruction};
 
 /// Library version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

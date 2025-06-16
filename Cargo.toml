@@ -36,6 +36,7 @@ features = [
     "Win32_System_Environment",
     "Win32_System_Memory", 
     "Win32_System_Kernel",
+    "Win32_System_ProcessStatus",
     "Win32_System_SystemInformation",
     "Win32_System_SystemServices",
     "Win32_System_Diagnostics_Debug",
@@ -43,7 +44,9 @@ features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
     "Win32_System_Console",
-    "Win32_Security"
+    "Win32_Security",
+    "Win32_Storage",
+    "Win32_Storage_FileSystem"
 ]
 
 [dependencies.serde]
@@ -93,8 +96,16 @@ name = "genshin_bili_injector"
 path = "examples/genshin/genshin_bili_injector.rs"
 
 [[example]]
-name = "genshin_fps_unlocker"
-path = "examples/genshin/genshin_fps_unlocker.rs"
+name = "fps_unlocker_wine"
+path = "examples/genshin/fps_unlocker/fps_unlocker_wine.rs"
+
+[[example]]
+name = "fps_unlocker_win"
+path = "examples/genshin/fps_unlocker/fps_unlocker_win.rs"
+
+[[example]]
+name = "process_info"
+path = "examples/genshin/process_info.rs"
 
 [profile.release]
 lto = true
