@@ -1,15 +1,15 @@
-//! 原神FPS解锁器 - Windows版本 (简化主模块版本)
+//! Genshin Impact FPS Unlocker - Windows version (Simplified main module version)
 //!
-//! 基于简化后的C语言版本翻译，直接使用主模块
+//! Based on simplified C version, directly uses main module
 //!
-//! > 感谢 https://github.com/xiaonian233/genshin-fps-unlock
+//! Acknowledge https://github.com/xiaonian233/genshin-fps-unlock
 //!
-//! ## 使用方法
+//! ## Usage
 //! ```bash
-//! # 编译
+//! # Build
 //! cargo build --example genshin_fps_unlocker_win --target x86_64-pc-windows-msvc --release
 //!
-//! # 使用
+//! # Usage
 //! fps_unlocker_win.exe "C:\path\to\YuanShen.exe" 144
 //! ```
 
@@ -48,7 +48,6 @@ fn try_read_memory(process: HANDLE, addr: usize, size: usize) -> Result<Vec<u8>,
     Ok(buf)
 }
 
-// 翻译C语言的GetPID函数
 fn get_pid_by_name(process_name: &str) -> Option<u32> {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -83,7 +82,6 @@ fn get_pid_by_name(process_name: &str) -> Option<u32> {
     }
 }
 
-// 翻译C语言的GetMainModule函数
 fn get_main_module(pid: u32, module_name: &str) -> Option<(usize, u32)> {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
@@ -115,7 +113,6 @@ fn get_main_module(pid: u32, module_name: &str) -> Option<(usize, u32)> {
     }
 }
 
-// 翻译C语言的模式匹配算法
 fn pattern_to_byte(pattern: &str) -> Vec<i32> {
     let mut bytes = Vec::new();
     let chars: Vec<char> = pattern.chars().collect();
@@ -125,11 +122,10 @@ fn pattern_to_byte(pattern: &str) -> Vec<i32> {
         if chars[i] == '?' {
             bytes.push(-1);
             if i + 1 < chars.len() && chars[i + 1] == '?' {
-                i += 1; // 跳过第二个?
+                i += 1;
             }
             i += 1;
         } else if chars[i] != ' ' {
-            // 读取十六进制字节
             let mut hex_str = String::new();
             while i < chars.len() && chars[i] != ' ' && chars[i] != '?' {
                 hex_str.push(chars[i]);
@@ -139,7 +135,7 @@ fn pattern_to_byte(pattern: &str) -> Vec<i32> {
                 bytes.push(byte_val as i32);
             }
         } else {
-            i += 1; // 跳过空格
+            i += 1;
         }
     }
     bytes
@@ -168,7 +164,6 @@ fn pattern_scan_region(start_address: usize, region_size: usize, signature: &str
     None
 }
 
-// 翻译C语言的LaunchGame函数
 fn launch_game(game_path: &str) -> Result<(HANDLE, u32), String> {
     let game_path_wide: Vec<u16> = OsStr::new(game_path).encode_wide().chain(Some(0)).collect();
     let work_dir = Path::new(game_path).parent().unwrap();
@@ -200,21 +195,17 @@ fn launch_game(game_path: &str) -> Result<(HANDLE, u32), String> {
         CloseHandle(pi.hThread);
         println!("Game PID: {}", pi.dwProcessId);
 
-        // 设置高优先级
         SetPriorityClass(pi.hProcess, HIGH_PRIORITY_CLASS);
 
         Ok((pi.hProcess, pi.dwProcessId))
     }
 }
 
-// 翻译C语言的FindFPSVariableInMainModule函数
 fn find_fps_variable_in_main_module(process: HANDLE, main_base: usize) -> Result<usize, String> {
     println!("Locating FPS variable in main module...");
 
-    // 读取PE头
     let pe_header = try_read_memory(process, main_base, 0x1000)?;
 
-    // 解析DOS头和NT头
     let dos_header = unsafe { &*(pe_header.as_ptr() as *const IMAGE_DOS_HEADER) };
     let nt_headers = unsafe {
         &*(pe_header.as_ptr().add(dos_header.e_lfanew as usize) as *const IMAGE_NT_HEADERS64)
@@ -224,7 +215,6 @@ fn find_fps_variable_in_main_module(process: HANDLE, main_base: usize) -> Result
         return Err("Invalid PE file".to_string());
     }
 
-    // 查找.text段
     let section_headers = unsafe {
         std::slice::from_raw_parts(
             pe_header
@@ -254,12 +244,10 @@ fn find_fps_variable_in_main_module(process: HANDLE, main_base: usize) -> Result
         return Err(".text section not found".to_string());
     }
 
-    // 读取.text段
     let text_data = try_read_memory(process, text_rva, text_size as usize)?;
 
     println!("Searching for FPS pattern in main executable...");
 
-    // 在本地内存中搜索FPS模式（与C语言版本相同）
     let local_text_ptr = text_data.as_ptr() as usize;
     if let Some(pattern_offset) = pattern_scan_region(
         local_text_ptr,
@@ -268,11 +256,9 @@ fn find_fps_variable_in_main_module(process: HANDLE, main_base: usize) -> Result
     ) {
         println!("Found FPS pattern in main module");
 
-        // 解析相对地址（与C语言版本完全相同）
         let pattern_addr = text_rva + (pattern_offset - local_text_ptr);
-        let rip = pattern_addr + 2; // 跳过 mov ecx
+        let rip = pattern_addr + 2;
 
-        // 读取偏移量
         let offset_start = (pattern_offset - local_text_ptr) + 2;
         let offset_bytes = &text_data[offset_start..offset_start + 4];
         let offset = i32::from_le_bytes([
@@ -296,7 +282,7 @@ fn format_current_time() -> String {
 
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
     let total_secs = now.as_secs();
-    let local_secs = total_secs % 86400; // 今日秒数
+    let local_secs = total_secs % 86400;
     let hours = (local_secs / 3600) % 24;
     let minutes = (local_secs / 60) % 60;
     let seconds = local_secs % 60;
@@ -305,29 +291,24 @@ fn format_current_time() -> String {
 }
 
 fn unlock_fps_main_module(game_path: &str, target_fps: i32) -> Result<(), String> {
-    // 检查游戏文件是否存在
     if !Path::new(game_path).exists() {
         return Err("Game file not found".to_string());
     }
 
     let game_exe = Path::new(game_path).file_name().unwrap().to_str().unwrap();
 
-    // 检查游戏是否已经在运行
     if get_pid_by_name(game_exe).is_some() {
         return Err("Game is already running! Please close it first.".to_string());
     }
 
-    // 启动游戏
     let (process_handle, launched_pid) = launch_game(game_path)?;
     thread::sleep(Duration::from_millis(200));
 
-    // 只等待主模块 - 简化逻辑（对照C语言版本）
     println!("Waiting for main module...");
     let mut main_base = None;
     let mut main_size = 0;
 
     for _ in 0..2000 {
-        // 10000 / 5 = 2000次检查
         if let Some((base, size)) = get_main_module(launched_pid, game_exe) {
             main_base = Some(base);
             main_size = size;
@@ -350,11 +331,9 @@ fn unlock_fps_main_module(game_path: &str, target_fps: i32) -> Result<(), String
         game_exe, main_base, main_size
     );
 
-    // 直接在主模块中查找FPS变量
     let fps_addr = find_fps_variable_in_main_module(process_handle, main_base)?;
     println!("Target FPS: {}", target_fps);
 
-    // 初始设置FPS
     unsafe {
         let mut bytes_written = 0;
         if WriteProcessMemory(
@@ -373,7 +352,6 @@ fn unlock_fps_main_module(game_path: &str, target_fps: i32) -> Result<(), String
     println!("FPS unlocked successfully!");
     println!("Monitoring (Press Ctrl+C to exit):\n");
 
-    // 监控循环（完全对照C语言版本）
     unsafe {
         let mut exit_code = STILL_ACTIVE;
         let mut counter = 0;
@@ -384,7 +362,6 @@ fn unlock_fps_main_module(game_path: &str, target_fps: i32) -> Result<(), String
 
             counter += 1;
 
-            // 每2秒直接重写FPS值（与C语言版本完全相同）
             let mut bytes_written = 0;
             if WriteProcessMemory(
                 process_handle,

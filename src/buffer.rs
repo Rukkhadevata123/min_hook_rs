@@ -46,7 +46,6 @@ struct MemoryBlock {
     used_count: u32,
 }
 
-// 为了线程安全，我们需要实现 Send 和 Sync
 unsafe impl Send for MemoryBlock {}
 unsafe impl Sync for MemoryBlock {}
 unsafe impl Send for MemorySlot {}
@@ -58,7 +57,7 @@ struct BufferManager {
     blocks: *mut MemoryBlock,
 }
 
-// 实现 Send 和 Sync 以支持 Mutex
+// Implement Send and Sync to use Mutex
 unsafe impl Send for BufferManager {}
 unsafe impl Sync for BufferManager {}
 

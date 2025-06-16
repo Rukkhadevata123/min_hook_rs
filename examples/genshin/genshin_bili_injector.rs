@@ -1,24 +1,24 @@
-//! 原神B服DLL注入器
+//! Genshin Impact Bilibili DLL Injector
 //!
-//! ## 正确的文件结构
+//! ## Correct file structure
 //! ```
 //! /run/media/yoimiya/Data/Program Files/Genshin Impact/
-//! ├── genshin_bili_dll.dll           # Hook DLL (放在这里，避免游戏数据异常)
-//! ├── genshin_bili_injector.exe      # 注入器 (放在这里)
+//! ├── genshin_bili_dll.dll           # Hook DLL (place here to avoid game data issues)
+//! ├── genshin_bili_injector.exe      # Injector (place here)
 //! └── Genshin Impact Game/
-//!     ├── YuanShen.exe               # 原神主程序
-//!     ├── login.json                 # 登录数据 (放在这里)
+//!     ├── YuanShen.exe               # Genshin Impact main program
+//!     ├── login.json                 # Login data (place here)
 //!     └── YuanShen_Data/
 //!         └── Plugins/
-//!             └── PCGameSDK.dll      # 被Hook的目标DLL
+//!             └── PCGameSDK.dll      # Target DLL to be hooked
 //! ```
 //!
-//! ## 使用方法
+//! ## Usage
 //! ```bash
-//! # 进入游戏目录
+//! # Enter game directory
 //! cd "/run/media/yoimiya/Data/Program Files/Genshin Impact/Genshin Impact Game/"
 //!
-//! # 运行注入器 (使用相对路径引用上级目录的文件)
+//! # Run injector (using relative path to reference parent directory files)
 //! start ..\genshin_bili_injector.exe YuanShen.exe ..\genshin_bili_dll.dll
 //! ```
 
@@ -91,13 +91,13 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 3 {
-        eprintln!("用法: {} <游戏命令> <DLL路径>", args[0]);
+        eprintln!("Usage: {} <game_command> <dll_path>", args[0]);
         eprintln!(
-            "示例: {} \"YuanShen.exe\" ..\\genshin_bili_dll.dll",
+            "Example: {} \"YuanShen.exe\" ..\\genshin_bili_dll.dll",
             args[0]
         );
         eprintln!();
-        eprintln!("注意: 必须在游戏目录下运行，DLL文件放在上级目录");
+        eprintln!("Note: Must run in game directory, DLL file placed in parent directory");
         return;
     }
 
@@ -105,12 +105,12 @@ fn main() {
     let dll_path = &args[2];
 
     if !Path::new(dll_path).exists() {
-        eprintln!("DLL文件不存在: {}", dll_path);
+        eprintln!("DLL file does not exist: {}", dll_path);
         return;
     }
 
     if !Path::new("login.json").exists() {
-        eprintln!("login.json文件不存在 (应该在当前目录)");
+        eprintln!("login.json file does not exist (should be in current directory)");
         return;
     }
 
@@ -142,7 +142,7 @@ fn main() {
     };
 
     if created == 0 {
-        eprintln!("创建进程失败: {}", unsafe { GetLastError() });
+        eprintln!("Failed to create process: {}", unsafe { GetLastError() });
         return;
     }
 
@@ -150,14 +150,14 @@ fn main() {
         Ok(_) => {
             unsafe {
                 if ResumeThread(process_info.hThread) == u32::MAX {
-                    eprintln!("恢复线程失败: {}", GetLastError());
+                    eprintln!("Failed to resume thread: {}", GetLastError());
                     return;
                 }
             }
-            println!("注入成功，原神已启动");
+            println!("Injection successful, Genshin Impact started");
         }
         Err(e) => {
-            eprintln!("注入失败: {}", e);
+            eprintln!("Injection failed: {}", e);
             unsafe {
                 TerminateProcess(process_info.hProcess, 1);
             }

@@ -32,7 +32,6 @@ pub unsafe extern "system" fn hooked_messagebox(
 ) -> i32 {
     unsafe {
         MESSAGEBOX_HOOK_COUNT += 1;
-        // 使用ptr::read避免静态引用
         let count = ptr::addr_of!(MESSAGEBOX_HOOK_COUNT).read();
         println!("[HOOK] MessageBoxA intercepted! Call #{}", count);
 
@@ -68,7 +67,6 @@ pub unsafe extern "system" fn hooked_gettickcount() -> u32 {
     unsafe {
         GETTICKCOUNT_HOOK_COUNT += 1;
 
-        // 使用ptr::read避免静态引用
         let count = ptr::addr_of!(GETTICKCOUNT_HOOK_COUNT).read();
 
         // Only print every 100 calls to avoid spam
@@ -467,7 +465,6 @@ fn test_performance_stability() -> Result<()> {
     println!("1000 calls completed in {:?}", elapsed);
 
     unsafe {
-        // 使用ptr::read避免静态引用
         let msgbox_count = ptr::addr_of!(MESSAGEBOX_HOOK_COUNT).read();
         let tick_count = ptr::addr_of!(GETTICKCOUNT_HOOK_COUNT).read();
         println!(
@@ -584,7 +581,6 @@ fn main() -> Result<()> {
     println!("\nAll {} test phases completed successfully!", 6 + 6); // 6 basic + 6 enhanced
 
     unsafe {
-        // 使用ptr::read避免静态引用
         let total_messagebox_calls = ptr::addr_of!(MESSAGEBOX_HOOK_COUNT).read();
         let total_gettickcount_calls = ptr::addr_of!(GETTICKCOUNT_HOOK_COUNT).read();
         println!("\nTotal intercepted calls:");

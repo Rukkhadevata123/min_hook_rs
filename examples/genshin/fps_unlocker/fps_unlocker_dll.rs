@@ -1,8 +1,8 @@
-//! 原神FPS解锁器 - DLL部分
+//! Genshin Impact FPS Unlocker - DLL part
 //!
-//! 完全对照C++版本实现，注入到游戏进程中执行FPS写入
+//! Completely based on C# version implementation, injected into game process to perform FPS writing
 //!
-//! 感谢https://github.com/34736384/genshin-fps-unlock
+//! Acknowledge https://github.com/34736384/genshin-fps-unlock
 
 use std::ffi::c_void;
 use std::ptr;
@@ -14,7 +14,7 @@ use windows_sys::Win32::System::SystemServices::*;
 use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-// IPC数据结构（与注入器和C++完全一致）
+// IPC data structure (completely consistent with injector and C#)
 #[repr(C, align(8))]
 #[derive(Debug, Clone, Copy)]
 struct IpcData {
@@ -25,7 +25,7 @@ struct IpcData {
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] // 允许未使用的变体
+#[allow(dead_code)]
 enum IpcStatus {
     Error = -1,
     #[allow(dead_code)]
@@ -39,7 +39,7 @@ enum IpcStatus {
 
 const IPC_GUID: &[u8] = b"2DE95FDC-6AB7-4593-BFE6-760DD4AB422B\0";
 
-// 值范围限制（对照C++ Clamp函数）
+// Value range limitation (based on c# Clamp function)
 fn clamp<T: PartialOrd>(val: T, min: T, max: T) -> T {
     if val < min {
         min
@@ -50,13 +50,13 @@ fn clamp<T: PartialOrd>(val: T, min: T, max: T) -> T {
     }
 }
 
-// FPS写入线程（完全对照C++ ThreadProc）
+// FPS writing thread (completely based on c# ThreadProc)
 unsafe extern "system" fn thread_proc(_: *mut c_void) -> u32 {
     unsafe {
-        // 增加模块引用计数（对照C++ LdrAddRefDll）
-        // 注：Rust没有直接等价物，但DLL已经被加载了
+        // Increase module reference count (based on c# LdrAddRefDll)
+        // Note: Rust has no direct equivalent, but DLL is already loaded
 
-        // 打开IPC文件映射
+        // Open IPC file mapping
         let file_mapping = OpenFileMappingA(FILE_MAP_READ | FILE_MAP_WRITE, 0, IPC_GUID.as_ptr());
         if file_mapping.is_null() {
             return 0;
@@ -71,7 +71,7 @@ unsafe extern "system" fn thread_proc(_: *mut c_void) -> u32 {
         let ipc_data = view.Value as *mut IpcData;
         let fps_addr = (*ipc_data).address as *mut i32;
 
-        // 验证地址有效性（对照C++ VirtualQuery检查）
+        // Validate address validity (based on c# VirtualQuery check)
         let mut mbi: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
         if VirtualQuery(
             fps_addr as *const c_void,
@@ -86,11 +86,11 @@ unsafe extern "system" fn thread_proc(_: *mut c_void) -> u32 {
             return 0;
         }
 
-        // 通知主程序准备就绪
+        // Notify main program ready
         (*ipc_data).status = IpcStatus::ClientReady as i32;
 
-        // FPS写入循环（对照C++的while循环）
-        // 告诉编译器这是可能被外部修改的内存
+        // FPS writing loop (based on c# while loop)
+        // Tell compiler this is memory that might be modified externally
         while ptr::read_volatile(&(*ipc_data).status) != IpcStatus::HostExit as i32 {
             let target_fps = ptr::read_volatile(&(*ipc_data).value);
             let clamped_fps = clamp(target_fps, 1, 1000);
@@ -98,7 +98,7 @@ unsafe extern "system" fn thread_proc(_: *mut c_void) -> u32 {
             Sleep(62);
         }
 
-        // 通知主程序即将退出
+        // Notify main program about to exit
         (*ipc_data).status = IpcStatus::ClientExit as i32;
 
         UnmapViewOfFile(view);
@@ -107,7 +107,7 @@ unsafe extern "system" fn thread_proc(_: *mut c_void) -> u32 {
     }
 }
 
-// DLL主入口点（完全对照C++ DllMain）
+// DLL main entry point (completely based on c# DllMain)
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn DllMain(
     hinst_dll: HINSTANCE,
@@ -116,17 +116,17 @@ pub unsafe extern "system" fn DllMain(
 ) -> i32 {
     unsafe {
         if !hinst_dll.is_null() {
-            // 对照C++ DisableThreadLibraryCalls
+            // Based on c# DisableThreadLibraryCalls
             DisableThreadLibraryCalls(hinst_dll);
         }
 
-        // 检查是否在游戏进程中（对照C++ GetModuleHandleA("mhypbase.dll")）
+        // Check if in game process (based on c# GetModuleHandleA("mhypbase.dll"))
         if GetModuleHandleA(c"mhypbase.dll".as_ptr() as *const u8).is_null() {
-            return 1; // 不是游戏进程，安全退出
+            return 1; // Not game process, safe exit
         }
 
         if fdw_reason == DLL_PROCESS_ATTACH {
-            // 创建FPS写入线程（对照C++ CreateThread）
+            // Create FPS writing thread (based on c# CreateThread)
             let thread_handle = CreateThread(
                 ptr::null(),
                 0,
@@ -145,7 +145,7 @@ pub unsafe extern "system" fn DllMain(
     }
 }
 
-// 导出的窗口过程（对照C++ WndProc，用于SetWindowsHookEx注入）
+// Exported window procedure (based on c# WndProc, used for SetWindowsHookEx injection)
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn WndProc(code: i32, wparam: usize, lparam: isize) -> isize {
     unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) }

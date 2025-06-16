@@ -1,18 +1,18 @@
-//! 原神FPS解锁器 - Rust版本
+//! Genshin Impact FPS Unlocker - Rust version
 //!
-//! 基于原始C版本重写，支持GI v4.8.0+
+//! Rewritten from original C version, supports GI v4.8.0+
 //!
-//! > 感谢[fpsunlock](https://codeberg.org/mkrsym1/fpsunlock) 提供灵感
+//! Acknowledge [fpsunlock](https://codeberg.org/mkrsym1/fpsunlock)
 //!
-//! ## 使用方法
+//! ## Usage
 //! ```bash
-//! # 编译
+//! # Build
 //! cargo xwin build --example genshin_fps_unlocker --target x86_64-pc-windows-msvc --release
 //!
-//! # 使用 (游戏必须已经启动)
+//! # Usage (game must be already running)
 //! wine genshin_fps_unlocker.exe 144
-//! wine genshin_fps_unlocker.exe 144 5000  # 每5秒写入一次  
-//! wine genshin_fps_unlocker.exe 144 -1    # 只写入一次
+//! wine genshin_fps_unlocker.exe 144 5000  # Write every 5 seconds
+//! wine genshin_fps_unlocker.exe 144 -1    # Write only once
 //! ```
 
 use std::env;
@@ -28,7 +28,7 @@ use windows_sys::Win32::System::Threading::*;
 const GAME_EXES: &[&str] = &["GenshinImpact.exe", "YuanShen.exe"];
 const ANY: i16 = -1;
 
-// 模式：mov ecx, 60; call setter; cmp byte
+// Pattern: mov ecx, 60; call setter; cmp byte
 const SETTER_CALL_PATTERN: &[i16] = &[
     0xB9, 0x3C, 0x00, 0x00, 0x00, // B9 3C000000    mov ecx, 60
     0xE8, ANY, ANY, ANY, ANY,  // E8 ????????    call setter
@@ -100,7 +100,7 @@ fn find_game_process() -> Result<HANDLE, String> {
     }
 }
 
-// 使用C语言相同的状态机算法
+// State machine algorithm matching the C version
 fn find_pattern(data: &[u8], pattern: &[i16]) -> Option<usize> {
     let mut current = 0;
     let mut pattern_pos = 0;
@@ -158,7 +158,6 @@ fn find_pattern_ex_in_module(
 ) -> Result<Option<usize>, String> {
     let header = try_read_memory(process, module, 0x1000)?;
 
-    // 使用 windows-sys 提供的结构体
     let dos_header = unsafe { &*(header.as_ptr() as *const IMAGE_DOS_HEADER) };
     let nt_headers = unsafe {
         &*(header.as_ptr().add(dos_header.e_lfanew as usize) as *const IMAGE_NT_HEADERS64)
@@ -193,9 +192,9 @@ fn find_pattern_ex_in_module(
 }
 
 fn find_fps_var(process: HANDLE) -> Result<usize, String> {
-    let executable = 0x140000000usize; // 游戏主模块基址
+    let executable = 0x140000000usize; // Game main module base address
 
-    // 在可执行段搜索setter call模式
+    // Search for setter call pattern in executable section
     let setter_call = find_pattern_ex_in_module(
         process,
         executable,
@@ -204,14 +203,14 @@ fn find_fps_var(process: HANDLE) -> Result<usize, String> {
     )?
     .ok_or("Could not find setter call")?;
 
-    // 跟踪调用链
-    let mut potential_mov = setter_call + 5; // 跳过模式长度
+    // Follow call chain
+    let mut potential_mov = setter_call + 5; // Skip pattern length
 
     loop {
         let bytes_at_addr = try_read_memory(process, potential_mov, 6)?;
 
         if bytes_at_addr[0] == 0xE9 || bytes_at_addr[0] == 0xE8 {
-            // jmp/call 指令，跟踪跳转
+            // jmp/call instruction, follow jump
             let offset = i32::from_le_bytes([
                 bytes_at_addr[1],
                 bytes_at_addr[2],
@@ -246,7 +245,7 @@ fn unlock_fps(target_fps: i32, interval: i64) -> Result<(), String> {
     let game = find_game_process()?;
     let fps_addr = find_fps_var(game)?;
 
-    // 写入FPS值
+    // Write FPS value
     unsafe {
         let mut bytes_written = 0;
         if WriteProcessMemory(
@@ -263,7 +262,7 @@ fn unlock_fps(target_fps: i32, interval: i64) -> Result<(), String> {
     }
 
     if interval > 0 {
-        // 定期写入
+        // Periodic writing
         loop {
             unsafe {
                 let mut bytes_written = 0;
@@ -275,7 +274,7 @@ fn unlock_fps(target_fps: i32, interval: i64) -> Result<(), String> {
                     &mut bytes_written,
                 ) == 0
                 {
-                    // 写入失败，可能游戏已关闭
+                    // Write failed, game may have closed
                     break;
                 }
             }
@@ -300,7 +299,7 @@ fn main() {
         }
         2 => {
             let fps = args[1].parse::<i32>().unwrap_or(0);
-            (fps, 5000i64) // 默认5秒
+            (fps, 5000i64) // Default 5 seconds
         }
         _ => {
             eprintln!("Usage: wine fpsunlock.exe [FPS] <interval>");

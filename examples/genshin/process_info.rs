@@ -1,7 +1,7 @@
-//! Process Information Tool - 动态查找进程基址和模块信息
+//! Process Information Tool - Dynamic process base address and module information
 //!
-//! 用法: cargo run --example process_info -- <process_name.exe>
-//! 示例: cargo run --example process_info -- GenshinImpact.exe
+//! Usage: cargo run --example process_info -- <process_name.exe>
+//! Example: cargo run --example process_info -- GenshinImpact.exe
 
 use std::env;
 use std::mem;
@@ -27,7 +27,7 @@ struct ModuleInfo {
     size: u32,
 }
 
-// 仿照C语言的GetPID函数
+// C-style GetPID function
 fn get_pid_by_name(process_name: &str) -> Option<u32> {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -62,7 +62,7 @@ fn get_pid_by_name(process_name: &str) -> Option<u32> {
     }
 }
 
-// 仿照C语言的GetModule函数
+// C-style GetModule function
 fn get_module_info(pid: u32, module_name: &str) -> Option<(usize, u32)> {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
@@ -95,23 +95,24 @@ fn get_module_info(pid: u32, module_name: &str) -> Option<(usize, u32)> {
 }
 
 fn get_process_by_name(process_name: &str) -> Result<ProcessInfo, String> {
-    // 进程查找: 使用CreateToolhelp32Snapshot + Process32First/Next
+    // Process lookup using CreateToolhelp32Snapshot + Process32First/Next
     let pid = get_pid_by_name(process_name)
         .ok_or_else(|| format!("Process '{}' not found", process_name))?;
 
-    // 权限处理: 直接使用高权限PROCESS_ALL_ACCESS
+    // Request high privilege PROCESS_ALL_ACCESS
     let process = unsafe { OpenProcess(PROCESS_ALL_ACCESS, 0, pid) };
     if process.is_null() {
-        return Err(format!("OpenProcess failed: {} (需要管理员权限)", unsafe {
-            GetLastError()
-        }));
+        return Err(format!(
+            "OpenProcess failed: {} (requires admin privileges)",
+            unsafe { GetLastError() }
+        ));
     }
 
-    // 基址获取: 通过GetModule函数获取主模块基址
+    // Get main module base address via GetModule function
     let (base_address, image_size) = get_module_info(pid, process_name)
         .ok_or_else(|| "Failed to get module information".to_string())?;
 
-    // 读取PE头获取入口点
+    // Read PE header to get entry point
     let entry_point = unsafe {
         let mut dos_header: IMAGE_DOS_HEADER = mem::zeroed();
         let mut bytes_read = 0;
@@ -161,7 +162,7 @@ fn get_process_modules(pid: u32) -> Result<Vec<ModuleInfo>, String> {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
         if snapshot == INVALID_HANDLE_VALUE {
             return Err(format!(
-                "CreateToolhelp32Snapshot for modules failed: {} (需要管理员权限)",
+                "CreateToolhelp32Snapshot for modules failed: {} (requires admin privileges)",
                 GetLastError()
             ));
         }
@@ -194,7 +195,7 @@ fn get_process_modules(pid: u32) -> Result<Vec<ModuleInfo>, String> {
 
 fn analyze_pe_sections(process: HANDLE, base_address: usize) -> Result<(), String> {
     unsafe {
-        // 读取DOS头
+        // Read DOS header
         let mut dos_header: IMAGE_DOS_HEADER = mem::zeroed();
         let mut bytes_read = 0;
         if ReadProcessMemory(
@@ -208,7 +209,7 @@ fn analyze_pe_sections(process: HANDLE, base_address: usize) -> Result<(), Strin
             return Err(format!("Failed to read DOS header: {}", GetLastError()));
         }
 
-        // 读取NT头
+        // Read NT headers
         let mut nt_headers: IMAGE_NT_HEADERS64 = mem::zeroed();
         if ReadProcessMemory(
             process,
@@ -221,7 +222,7 @@ fn analyze_pe_sections(process: HANDLE, base_address: usize) -> Result<(), Strin
             return Err(format!("Failed to read NT headers: {}", GetLastError()));
         }
 
-        // 复制字段到局部变量以避免对packed字段的引用
+        // Copy fields to local variables to avoid references to packed fields
         let machine = nt_headers.FileHeader.Machine;
         let num_sections = nt_headers.FileHeader.NumberOfSections;
         let image_base = nt_headers.OptionalHeader.ImageBase;
@@ -238,7 +239,7 @@ fn analyze_pe_sections(process: HANDLE, base_address: usize) -> Result<(), Strin
         );
         println!("  Size of image: 0x{:X}", size_of_image);
 
-        // 读取节表
+        // Read section table
         let sections_offset = dos_header.e_lfanew as usize + mem::size_of::<IMAGE_NT_HEADERS64>();
         let mut sections_data =
             vec![0u8; num_sections as usize * mem::size_of::<IMAGE_SECTION_HEADER>()];
@@ -267,7 +268,7 @@ fn analyze_pe_sections(process: HANDLE, base_address: usize) -> Result<(), Strin
             let name =
                 std::ffi::CStr::from_ptr(section.Name.as_ptr() as *const i8).to_string_lossy();
 
-            // 复制字段到局部变量
+            // Copy fields to local variables
             let virtual_address = section.VirtualAddress;
             let size_of_raw_data = section.SizeOfRawData;
             let characteristics = section.Characteristics;
@@ -280,7 +281,7 @@ fn analyze_pe_sections(process: HANDLE, base_address: usize) -> Result<(), Strin
                 characteristics
             );
 
-            // 标注重要的节
+            // Mark important sections
             if characteristics & IMAGE_SCN_MEM_EXECUTE != 0 {
                 println!("    ^ Executable section");
             }
@@ -301,12 +302,12 @@ fn main() {
     if args.len() != 2 {
         eprintln!("Usage: {} <process_name.exe>", args[0]);
         eprintln!("Example: {} GenshinImpact.exe", args[0]);
-        eprintln!("Note: 需要管理员权限");
+        eprintln!("Note: Requires administrator privileges");
         eprintln!();
         eprintln!("Implementation details:");
-        eprintln!("  - 进程查找: 使用CreateToolhelp32Snapshot + Process32First/Next");
-        eprintln!("  - 权限处理: 直接使用高权限PROCESS_ALL_ACCESS");
-        eprintln!("  - 基址获取: 通过GetModule函数获取主模块基址");
+        eprintln!("  - Process lookup: CreateToolhelp32Snapshot + Process32First/Next");
+        eprintln!("  - Privilege handling: Direct use of high privilege PROCESS_ALL_ACCESS");
+        eprintln!("  - Base address retrieval: GetModule function for main module base");
         return;
     }
 
@@ -325,13 +326,13 @@ fn main() {
             println!("  Entry Point: 0x{:X}", process_info.entry_point);
             println!();
 
-            // 获取模块列表
+            // Get module list
             match get_process_modules(process_info.pid) {
                 Ok(modules) => {
                     println!("Loaded Modules ({} total):", modules.len());
                     for (i, module) in modules.iter().enumerate() {
                         if i < 10 {
-                            // 只显示前10个模块
+                            // Show only first 10 modules
                             println!(
                                 "  {} - Base: 0x{:X}, Size: 0x{:X}",
                                 module.name, module.base_address, module.size
@@ -348,7 +349,7 @@ fn main() {
                 }
             }
 
-            // 分析PE结构
+            // Analyze PE structure
             unsafe {
                 let process = OpenProcess(PROCESS_ALL_ACCESS, 0, process_info.pid);
 
@@ -359,7 +360,7 @@ fn main() {
                     CloseHandle(process);
                 } else {
                     eprintln!(
-                        "Failed to open process for PE analysis: {} (需要管理员权限)",
+                        "Failed to open process for PE analysis: {} (requires admin privileges)",
                         GetLastError()
                     );
                 }
@@ -367,7 +368,7 @@ fn main() {
         }
         Err(e) => {
             eprintln!("Error: {}", e);
-            eprintln!("Tip: 请以管理员身份运行此程序");
+            eprintln!("Tip: Please run this program as administrator");
         }
     }
 }

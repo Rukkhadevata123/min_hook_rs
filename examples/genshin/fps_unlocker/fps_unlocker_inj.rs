@@ -1,8 +1,8 @@
-//! 原神FPS解锁器 - DLL注入版本 (注入器)
+//! Genshin Impact FPS Unlocker - DLL injection version (injector)
 //!
-//! 使用SetWindowsHookEx注入，完全对照C#版本逻辑
+//! Uses SetWindowsHookEx injection, completely based on C# version logic
 //!
-//! > 感谢https://github.com/34736384/genshin-fps-unlock
+//! Acknowledge https://github.com/34736384/genshin-fps-unlock
 
 use std::env;
 use std::ffi::{CString, OsStr};
@@ -23,7 +23,7 @@ use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use windows_sys::core::BOOL;
 
-// IPC数据结构（与C#完全一致）
+// IPC data structure (completely consistent with C#)
 #[repr(C, align(8))]
 #[derive(Debug, Clone, Copy)]
 struct IpcData {
@@ -47,7 +47,7 @@ enum IpcStatus {
 
 const IPC_GUID: &str = "2DE95FDC-6AB7-4593-BFE6-760DD4AB422B";
 
-// 启动游戏进程
+// Launch game process
 fn launch_game(game_path: &str) -> Result<(HANDLE, u32, HANDLE), String> {
     let game_path_wide: Vec<u16> = OsStr::new(game_path).encode_wide().chain(Some(0)).collect();
     let work_dir = Path::new(game_path).parent().unwrap();
@@ -81,7 +81,7 @@ fn launch_game(game_path: &str) -> Result<(HANDLE, u32, HANDLE), String> {
     }
 }
 
-// 获取主模块
+// Get main module
 fn get_main_module(pid: u32, module_name: &str) -> Option<(usize, u32)> {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
@@ -113,7 +113,7 @@ fn get_main_module(pid: u32, module_name: &str) -> Option<(usize, u32)> {
     }
 }
 
-// 等待主模块加载
+// Wait for main module to load
 fn wait_for_main_module(pid: u32, game_exe: &str) -> Result<(usize, u32), String> {
     println!("Waiting for main module...");
 
@@ -133,7 +133,7 @@ fn wait_for_main_module(pid: u32, game_exe: &str) -> Result<(usize, u32), String
     Err("Main module timeout".to_string())
 }
 
-// 内存读取
+// Memory reading
 fn try_read_memory(process: HANDLE, addr: usize, size: usize) -> Result<Vec<u8>, String> {
     let mut buf = vec![0u8; size];
     unsafe {
@@ -156,7 +156,7 @@ fn try_read_memory(process: HANDLE, addr: usize, size: usize) -> Result<Vec<u8>,
     Ok(buf)
 }
 
-// 模式搜索
+// Pattern search
 fn pattern_to_byte(pattern: &str) -> Vec<i32> {
     let mut bytes = Vec::new();
     let chars: Vec<char> = pattern.chars().collect();
@@ -208,11 +208,11 @@ fn pattern_scan_region(start_address: usize, region_size: usize, signature: &str
     None
 }
 
-// 查找FPS变量
+// Find FPS variable
 fn find_fps_variable_in_main_module(process: HANDLE, main_base: usize) -> Result<usize, String> {
     println!("Locating FPS variable in main module...");
 
-    // 读取PE头
+    // Read PE header
     let pe_header = try_read_memory(process, main_base, 0x1000)?;
     let dos_header = unsafe { &*(pe_header.as_ptr() as *const IMAGE_DOS_HEADER) };
     let nt_headers = unsafe {
@@ -223,7 +223,7 @@ fn find_fps_variable_in_main_module(process: HANDLE, main_base: usize) -> Result
         return Err("Invalid PE file".to_string());
     }
 
-    // 查找.text段
+    // Find .text section
     let section_headers = unsafe {
         std::slice::from_raw_parts(
             pe_header
@@ -253,7 +253,7 @@ fn find_fps_variable_in_main_module(process: HANDLE, main_base: usize) -> Result
         return Err(".text section not found".to_string());
     }
 
-    // 读取.text段并搜索FPS模式
+    // Read .text section and search for FPS pattern
     let text_data = try_read_memory(process, text_rva, text_size as usize)?;
     println!("Searching for FPS pattern in main executable...");
 
@@ -265,11 +265,11 @@ fn find_fps_variable_in_main_module(process: HANDLE, main_base: usize) -> Result
     ) {
         println!("Found FPS pattern in main module");
 
-        // 解析相对地址
+        // Parse relative address
         let pattern_addr = text_rva + (pattern_offset - local_text_ptr);
-        let rip = pattern_addr + 2; // 跳过 mov ecx
+        let rip = pattern_addr + 2; // Skip mov ecx
 
-        // 读取偏移量
+        // Read offset
         let offset_start = (pattern_offset - local_text_ptr) + 2;
         let offset_bytes = &text_data[offset_start..offset_start + 4];
         let offset = i32::from_le_bytes([
@@ -287,7 +287,7 @@ fn find_fps_variable_in_main_module(process: HANDLE, main_base: usize) -> Result
     Err("FPS pattern not found - game version may not be supported".to_string())
 }
 
-// 创建IPC共享内存
+// Create IPC shared memory
 fn create_ipc(fps_addr: u64, target_fps: i32) -> Result<HANDLE, String> {
     let ipc_guid = CString::new(IPC_GUID).unwrap();
 
@@ -311,7 +311,7 @@ fn create_ipc(fps_addr: u64, target_fps: i32) -> Result<HANDLE, String> {
             return Err(format!("MapViewOfFile failed: {}", GetLastError()));
         }
 
-        // 初始化IPC数据
+        // Initialize IPC data
         let ipc_data = IpcData {
             address: fps_addr,
             value: target_fps,
@@ -326,14 +326,13 @@ fn create_ipc(fps_addr: u64, target_fps: i32) -> Result<HANDLE, String> {
     }
 }
 
-// 等待游戏窗口（带进程监控）
+// Wait for game window (with process monitoring)
 fn wait_for_game_window(process_id: u32, process_handle: HANDLE) -> Result<HWND, String> {
     println!("Waiting for game window...");
 
     for attempt in 1..=300 {
-        // 30秒超时
+        // 30 second timeout
         unsafe {
-            // 修复：使用 u32 而不是 i32
             let mut exit_code = STILL_ACTIVE as u32;
             if GetExitCodeProcess(process_handle, &mut exit_code) != 0
                 && exit_code != STILL_ACTIVE as u32
@@ -380,46 +379,45 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL 
     unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
 
     if pid == context.target_pid {
-        // 查找 Unity 游戏窗口（可见或隐藏都可以，因为会变成可见）
+        // Find Unity game window (visible or hidden, as it will become visible)
         let mut class_name = [0u16; 256];
         let len = unsafe { GetClassNameW(hwnd, class_name.as_mut_ptr(), class_name.len() as i32) };
         if len > 0 {
             let class_str = String::from_utf16_lossy(&class_name[..len as usize]);
             if class_str == "UnityWndClass" {
                 context.found_window = hwnd;
-                return FALSE; // 停止枚举
+                return FALSE; // Stop enumeration
             }
         }
     }
 
-    TRUE // 继续枚举
+    TRUE // Continue enumeration
 }
 
-// 修复DLL注入函数的参数问题
 fn inject_dll_with_hook(
     process_id: u32,
     process_handle: HANDLE,
     dll_path: &str,
 ) -> Result<(HMODULE, HHOOK), String> {
     unsafe {
-        // 1. 加载DLL到当前进程
+        // 1. Load DLL into current process
         let dll_path_wide: Vec<u16> = OsStr::new(dll_path).encode_wide().chain(Some(0)).collect();
         let stub_module = LoadLibraryW(dll_path_wide.as_ptr());
         if stub_module.is_null() {
             return Err(format!("Failed to load stub module: {}", GetLastError()));
         }
 
-        // 2. 获取WndProc函数地址
+        // 2. Get WndProc function address
         let stub_wnd_proc = GetProcAddress(stub_module, c"WndProc".as_ptr() as *const u8);
         if stub_wnd_proc.is_none() {
             FreeLibrary(stub_module);
             return Err("Failed to get WndProc address".to_string());
         }
 
-        // 3. 等待游戏窗口（修复参数）
+        // 3. Wait for game window
         let target_window = wait_for_game_window(process_id, process_handle)?;
 
-        // 4. 获取窗口线程ID
+        // 4. Get window thread ID
         let thread_id = GetWindowThreadProcessId(target_window, ptr::null_mut());
         if thread_id == 0 {
             FreeLibrary(stub_module);
@@ -428,7 +426,7 @@ fn inject_dll_with_hook(
 
         println!("Game window found, thread ID: {}", thread_id);
 
-        // 5. 设置窗口钩子
+        // 5. Set window hook
         let wnd_hook = SetWindowsHookExW(
             WH_GETMESSAGE,
             Some(std::mem::transmute::<
@@ -445,7 +443,7 @@ fn inject_dll_with_hook(
             return Err(format!("Failed to set window hook: {}", error));
         }
 
-        // 6. 发送消息触发钩子
+        // 6. Send message to trigger hook
         if PostThreadMessageW(thread_id, WM_NULL, 0, 0) == 0 {
             let error = GetLastError();
             UnhookWindowsHookEx(wnd_hook);
@@ -458,8 +456,6 @@ fn inject_dll_with_hook(
     }
 }
 
-// 修复监控函数，添加进程监控（参考fps_unlocker_win.rs）
-// 修复监控函数中的类型错误
 fn monitor_ipc(
     file_mapping: HANDLE,
     target_fps: i32,
@@ -475,18 +471,17 @@ fn monitor_ipc(
 
         let ipc_data = view.Value as *mut IpcData;
 
-        // 等待DLL准备就绪
+        // Wait for DLL to be ready
         println!("Waiting for DLL to be ready...");
         let mut retry_count = 0;
         loop {
-            // 修复：使用 u32 而不是 i32
             let mut exit_code = STILL_ACTIVE as u32;
             if GetExitCodeProcess(process_handle, &mut exit_code) != 0
                 && exit_code != STILL_ACTIVE as u32
             {
                 println!("Game process exited during DLL initialization");
                 UnmapViewOfFile(view);
-                return Ok(()); // 正常退出
+                return Ok(()); // Normal exit
             }
 
             let status = (*ipc_data).status;
@@ -509,9 +504,8 @@ fn monitor_ipc(
         println!("DLL is ready! FPS unlocked to {}", target_fps);
         println!("Monitoring... (Press Ctrl+C to exit)");
 
-        // 监控循环（修复类型）
+        // Monitoring loop
         loop {
-            // 修复：使用 u32 而不是 i32
             let mut exit_code = STILL_ACTIVE as u32;
             if GetExitCodeProcess(process_handle, &mut exit_code) != 0
                 && exit_code != STILL_ACTIVE as u32
@@ -532,11 +526,11 @@ fn monitor_ipc(
             }
         }
 
-        // 通知DLL退出
+        // Notify DLL to exit
         (*ipc_data).status = IpcStatus::HostExit as i32;
         thread::sleep(Duration::from_millis(200));
 
-        // 清理钩子和模块
+        // Clean up hook and module
         UnhookWindowsHookEx(wnd_hook);
         FreeLibrary(stub_module);
 
@@ -571,7 +565,7 @@ fn main() {
         }
     };
 
-    // 检查文件存在
+    // Check file existence
     if !Path::new(game_path).exists() {
         eprintln!("Error: Game file not found: {}", game_path);
         return;
@@ -587,32 +581,31 @@ fn main() {
     }
 }
 
-// 修复主函数调用
 fn run_fps_unlocker(game_path: &str, dll_path: &str, target_fps: i32) -> Result<(), String> {
     let game_exe = Path::new(game_path).file_name().unwrap().to_str().unwrap();
 
-    // 1. 启动游戏（挂起状态）
+    // 1. Launch game (suspended state)
     let (process_handle, process_id, thread_handle) = launch_game(game_path)?;
 
-    // 2. 恢复游戏进程
+    // 2. Resume game process
     unsafe {
         ResumeThread(thread_handle);
         CloseHandle(thread_handle);
     }
 
-    // 3. 等待主模块加载完成
+    // 3. Wait for main module to load
     let (main_base, _main_size) = wait_for_main_module(process_id, game_exe)?;
 
-    // 4. 查找FPS变量
+    // 4. Find FPS variable
     let fps_addr = find_fps_variable_in_main_module(process_handle, main_base)?;
 
-    // 5. 创建IPC
+    // 5. Create IPC
     let file_mapping = create_ipc(fps_addr as u64, target_fps)?;
 
-    // 6. 使用SetWindowsHookEx注入DLL（修复参数）
+    // 6. Use SetWindowsHookEx to inject DLL
     let (stub_module, wnd_hook) = inject_dll_with_hook(process_id, process_handle, dll_path)?;
 
-    // 7. 监控IPC（修复参数）
+    // 7. Monitor IPC
     let result = monitor_ipc(
         file_mapping,
         target_fps,
@@ -621,7 +614,7 @@ fn run_fps_unlocker(game_path: &str, dll_path: &str, target_fps: i32) -> Result<
         process_handle,
     );
 
-    // 清理
+    // Clean up
     unsafe {
         CloseHandle(file_mapping);
         CloseHandle(process_handle);
