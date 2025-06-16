@@ -104,6 +104,15 @@ name = "fps_unlocker_win"
 path = "examples/genshin/fps_unlocker/fps_unlocker_win.rs"
 
 [[example]]
+name = "fps_unlocker_inj"
+path = "examples/genshin/fps_unlocker/fps_unlocker_inj.rs"
+
+[[example]]
+name = "fps_unlocker_dll"
+path = "examples/genshin/fps_unlocker/fps_unlocker_dll.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "process_info"
 path = "examples/genshin/process_info.rs"
 
