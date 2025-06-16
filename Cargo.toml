@@ -104,6 +104,10 @@ name = "fps_unlocker_win"
 path = "examples/genshin/fps_unlocker/fps_unlocker_win.rs"
 
 [[example]]
+name = "fps_unlocker_win_hp"
+path = "examples/genshin/fps_unlocker/fps_unlocker_win_hp.rs"
+
+[[example]]
 name = "fps_unlocker_inj"
 path = "examples/genshin/fps_unlocker/fps_unlocker_inj.rs"
 
