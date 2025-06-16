@@ -2,6 +2,8 @@
 //!
 //! 基于简化后的C语言版本翻译，直接使用主模块
 //!
+//! > 感谢 https://github.com/xiaonian233/genshin-fps-unlock
+//!
 //! ## 使用方法
 //! ```bash
 //! # 编译

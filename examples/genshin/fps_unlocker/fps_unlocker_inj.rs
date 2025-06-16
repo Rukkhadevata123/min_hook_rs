@@ -1,6 +1,8 @@
 //! 原神FPS解锁器 - DLL注入版本 (注入器)
 //!
 //! 使用SetWindowsHookEx注入，完全对照C#版本逻辑
+//!
+//! > 感谢https://github.com/34736384/genshin-fps-unlock
 
 use std::env;
 use std::ffi::{CString, OsStr};

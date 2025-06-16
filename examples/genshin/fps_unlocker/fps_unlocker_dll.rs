@@ -1,6 +1,8 @@
 //! 原神FPS解锁器 - DLL部分
 //!
 //! 完全对照C++版本实现，注入到游戏进程中执行FPS写入
+//!
+//! 感谢https://github.com/34736384/genshin-fps-unlock
 
 use std::ffi::c_void;
 use std::ptr;
