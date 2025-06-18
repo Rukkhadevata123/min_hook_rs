@@ -286,8 +286,7 @@ impl BufferManager {
             (*block).used_count = 0;
 
             // Build free slot list
-            let mut slot =
-                (block as *mut u8).add(std::mem::size_of::<MemoryBlock>()) as *mut MemorySlot;
+            let mut slot = (block as *mut u8).add(size_of::<MemoryBlock>()) as *mut MemorySlot;
             let block_end = (block as *mut u8).add(MEMORY_BLOCK_SIZE);
 
             while (slot as *mut u8).add(MEMORY_SLOT_SIZE) <= block_end {
@@ -322,7 +321,7 @@ fn find_prev_free_region(
             if VirtualQuery(
                 try_addr as *const c_void,
                 &mut mbi,
-                std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+                size_of::<MEMORY_BASIC_INFORMATION>(),
             ) == 0
             {
                 break;
@@ -361,7 +360,7 @@ fn find_next_free_region(
             if VirtualQuery(
                 try_addr as *const c_void,
                 &mut mbi,
-                std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+                size_of::<MEMORY_BASIC_INFORMATION>(),
             ) == 0
             {
                 break;
@@ -419,7 +418,7 @@ pub fn is_executable_address(address: *mut c_void) -> bool {
         if VirtualQuery(
             address as *const c_void,
             &mut mbi,
-            std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+            size_of::<MEMORY_BASIC_INFORMATION>(),
         ) == 0
         {
             return false;

@@ -156,7 +156,7 @@ fn pattern_scan_region(start_address: usize, region_size: usize, signature: &str
     let pattern_bytes = pattern_to_byte(signature);
     let scan_bytes = unsafe { std::slice::from_raw_parts(start_address as *const u8, region_size) };
 
-    for i in 0..=(scan_bytes.len().saturating_sub(pattern_bytes.len())) {
+    for i in 0..=scan_bytes.len().saturating_sub(pattern_bytes.len()) {
         let mut found = true;
         for j in 0..pattern_bytes.len() {
             if pattern_bytes[j] != -1 && pattern_bytes[j] as u8 != scan_bytes[i + j] {
@@ -208,7 +208,7 @@ fn get_pid(process_name: &str) -> Option<u32> {
         }
 
         let mut entry: PROCESSENTRY32W = mem::zeroed();
-        entry.dwSize = mem::size_of::<PROCESSENTRY32W>() as u32;
+        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
 
         if Process32FirstW(snapshot, &mut entry) != 0 {
             loop {
@@ -240,7 +240,7 @@ fn get_module(pid: u32, module_name: &str) -> Option<(usize, u32)> {
         }
 
         let mut entry: MODULEENTRY32W = mem::zeroed();
-        entry.dwSize = mem::size_of::<MODULEENTRY32W>() as u32;
+        entry.dwSize = size_of::<MODULEENTRY32W>() as u32;
 
         if Module32FirstW(snapshot, &mut entry) != 0 {
             loop {

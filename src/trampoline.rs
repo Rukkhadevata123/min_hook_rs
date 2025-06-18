@@ -14,7 +14,7 @@ use std::ptr;
 compile_error!("Trampoline module only supports x86_64 architecture");
 
 /// Maximum size of a trampoline function (buffer size - relay jump size)
-const TRAMPOLINE_MAX_SIZE: usize = 64 - std::mem::size_of::<JmpAbs>();
+const TRAMPOLINE_MAX_SIZE: usize = 64 - size_of::<JmpAbs>();
 
 /// Minimum size required for hook installation (5 bytes for JMP rel32)
 const MIN_HOOK_SIZE: usize = 5;
@@ -98,12 +98,12 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
                 ptr::copy_nonoverlapping(
                     &final_jmp as *const JmpAbs as *const u8,
                     inst_buf.as_mut_ptr(),
-                    std::mem::size_of::<JmpAbs>(),
+                    size_of::<JmpAbs>(),
                 );
             }
 
             copy_src = inst_buf.as_ptr();
-            copy_size = std::mem::size_of::<JmpAbs>();
+            copy_size = size_of::<JmpAbs>();
             finished = true;
         }
         // Handle RIP-relative addressing instructions
@@ -149,12 +149,12 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
                 ptr::copy_nonoverlapping(
                     &call as *const CallAbs as *const u8,
                     inst_buf.as_mut_ptr(),
-                    std::mem::size_of::<CallAbs>(),
+                    size_of::<CallAbs>(),
                 );
             }
 
             copy_src = inst_buf.as_ptr();
-            copy_size = std::mem::size_of::<CallAbs>();
+            copy_size = size_of::<CallAbs>();
         }
         // Handle direct relative JMP (EB or E9)
         else if (inst.opcode & 0xFD) == 0xE9 {
@@ -183,12 +183,12 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
                     ptr::copy_nonoverlapping(
                         &jmp as *const JmpAbs as *const u8,
                         inst_buf.as_mut_ptr(),
-                        std::mem::size_of::<JmpAbs>(),
+                        size_of::<JmpAbs>(),
                     );
                 }
 
                 copy_src = inst_buf.as_ptr();
-                copy_size = std::mem::size_of::<JmpAbs>();
+                copy_size = size_of::<JmpAbs>();
 
                 // Exit the function if it is not in the branch
                 finished = old_inst_addr >= jmp_dest;
@@ -236,12 +236,12 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
                     ptr::copy_nonoverlapping(
                         &jcc as *const JccAbs as *const u8,
                         inst_buf.as_mut_ptr(),
-                        std::mem::size_of::<JccAbs>(),
+                        size_of::<JccAbs>(),
                     );
                 }
 
                 copy_src = inst_buf.as_ptr();
-                copy_size = std::mem::size_of::<JccAbs>();
+                copy_size = size_of::<JccAbs>();
             }
         }
         // Handle RET instructions
@@ -333,7 +333,7 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         ptr::copy_nonoverlapping(
             &relay_jmp as *const JmpAbs as *const u8,
             trampoline.relay as *mut u8,
-            std::mem::size_of::<JmpAbs>(),
+            size_of::<JmpAbs>(),
         );
     }
 

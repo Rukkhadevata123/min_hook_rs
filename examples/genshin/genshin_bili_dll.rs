@@ -118,8 +118,8 @@ pub extern "system" fn DllMain(_module: HMODULE, reason: u32, _reserved: *mut c_
                 Ok(trampoline) => {
                     unsafe {
                         ORIGINAL_LOAD_LIBRARY = Some(std::mem::transmute::<
-                            *mut std::ffi::c_void,
-                            unsafe extern "system" fn(*const u16) -> *mut std::ffi::c_void,
+                            *mut c_void,
+                            unsafe extern "system" fn(*const u16) -> *mut c_void,
                         >(trampoline));
                     }
 

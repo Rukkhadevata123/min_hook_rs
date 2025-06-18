@@ -76,7 +76,7 @@ unsafe extern "system" fn thread_proc(_: *mut c_void) -> u32 {
         if VirtualQuery(
             fps_addr as *const c_void,
             &mut mbi,
-            std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+            size_of::<MEMORY_BASIC_INFORMATION>(),
         ) == 0
             || mbi.Protect != PAGE_READWRITE
         {

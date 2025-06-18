@@ -378,7 +378,7 @@ impl HookManager {
             }
 
             let mut te = THREADENTRY32 {
-                dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+                dwSize: size_of::<THREADENTRY32>() as u32,
                 cntUsage: 0,
                 th32ThreadID: 0,
                 th32OwnerProcessID: 0,
@@ -396,7 +396,7 @@ impl HookManager {
                         frozen_threads.thread_ids.push(te.th32ThreadID);
                     }
 
-                    te.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+                    te.dwSize = size_of::<THREADENTRY32>() as u32;
                     if Thread32Next(snapshot, &mut te) == 0 {
                         break;
                     }

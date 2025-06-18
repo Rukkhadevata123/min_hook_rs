@@ -121,7 +121,7 @@ fn main() {
     }
 
     let mut startup_info: STARTUPINFOA = unsafe { std::mem::zeroed() };
-    startup_info.cb = std::mem::size_of::<STARTUPINFOA>() as u32;
+    startup_info.cb = size_of::<STARTUPINFOA>() as u32;
 
     let mut process_info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
     let command = CString::new(game_command.as_str()).unwrap();

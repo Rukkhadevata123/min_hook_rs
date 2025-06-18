@@ -36,7 +36,7 @@ fn get_pid_by_name(process_name: &str) -> Option<u32> {
         }
 
         let mut entry: PROCESSENTRY32W = mem::zeroed();
-        entry.dwSize = mem::size_of::<PROCESSENTRY32W>() as u32;
+        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
 
         if Process32FirstW(snapshot, &mut entry) == 0 {
             CloseHandle(snapshot);
@@ -71,7 +71,7 @@ fn get_module_info(pid: u32, module_name: &str) -> Option<(usize, u32)> {
         }
 
         let mut entry: MODULEENTRY32W = mem::zeroed();
-        entry.dwSize = mem::size_of::<MODULEENTRY32W>() as u32;
+        entry.dwSize = size_of::<MODULEENTRY32W>() as u32;
 
         if Module32FirstW(snapshot, &mut entry) != 0 {
             loop {
@@ -120,7 +120,7 @@ fn get_process_by_name(process_name: &str) -> Result<ProcessInfo, String> {
             process,
             base_address as *const _,
             &mut dos_header as *mut _ as *mut _,
-            mem::size_of::<IMAGE_DOS_HEADER>(),
+            size_of::<IMAGE_DOS_HEADER>(),
             &mut bytes_read,
         ) == 0
         {
@@ -133,7 +133,7 @@ fn get_process_by_name(process_name: &str) -> Result<ProcessInfo, String> {
             process,
             (base_address + dos_header.e_lfanew as usize) as *const _,
             &mut nt_headers as *mut _ as *mut _,
-            mem::size_of::<IMAGE_NT_HEADERS64>(),
+            size_of::<IMAGE_NT_HEADERS64>(),
             &mut bytes_read,
         ) == 0
         {
@@ -169,7 +169,7 @@ fn get_process_modules(pid: u32) -> Result<Vec<ModuleInfo>, String> {
 
         let mut modules = Vec::new();
         let mut entry: MODULEENTRY32W = mem::zeroed();
-        entry.dwSize = mem::size_of::<MODULEENTRY32W>() as u32;
+        entry.dwSize = size_of::<MODULEENTRY32W>() as u32;
 
         if Module32FirstW(snapshot, &mut entry) != 0 {
             loop {
@@ -202,7 +202,7 @@ fn analyze_pe_sections(process: HANDLE, base_address: usize) -> Result<(), Strin
             process,
             base_address as *const _,
             &mut dos_header as *mut _ as *mut _,
-            mem::size_of::<IMAGE_DOS_HEADER>(),
+            size_of::<IMAGE_DOS_HEADER>(),
             &mut bytes_read,
         ) == 0
         {
@@ -215,7 +215,7 @@ fn analyze_pe_sections(process: HANDLE, base_address: usize) -> Result<(), Strin
             process,
             (base_address + dos_header.e_lfanew as usize) as *const _,
             &mut nt_headers as *mut _ as *mut _,
-            mem::size_of::<IMAGE_NT_HEADERS64>(),
+            size_of::<IMAGE_NT_HEADERS64>(),
             &mut bytes_read,
         ) == 0
         {
@@ -240,9 +240,9 @@ fn analyze_pe_sections(process: HANDLE, base_address: usize) -> Result<(), Strin
         println!("  Size of image: 0x{:X}", size_of_image);
 
         // Read section table
-        let sections_offset = dos_header.e_lfanew as usize + mem::size_of::<IMAGE_NT_HEADERS64>();
+        let sections_offset = dos_header.e_lfanew as usize + size_of::<IMAGE_NT_HEADERS64>();
         let mut sections_data =
-            vec![0u8; num_sections as usize * mem::size_of::<IMAGE_SECTION_HEADER>()];
+            vec![0u8; num_sections as usize * size_of::<IMAGE_SECTION_HEADER>()];
 
         if ReadProcessMemory(
             process,
@@ -262,7 +262,7 @@ fn analyze_pe_sections(process: HANDLE, base_address: usize) -> Result<(), Strin
         for i in 0..num_sections {
             let section = &*(sections_data
                 .as_ptr()
-                .add(i as usize * mem::size_of::<IMAGE_SECTION_HEADER>())
+                .add(i as usize * size_of::<IMAGE_SECTION_HEADER>())
                 as *const IMAGE_SECTION_HEADER);
 
             let name =

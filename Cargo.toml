@@ -1,6 +1,6 @@
 [package]
 name = "min_hook_rs"
-version = "1.2.2"
+version = "1.2.3"
 edition = "2024"
 license = "MIT"
 authors = ["Rukkhadevata123 <3083913301@qq.com>"]
@@ -48,10 +48,6 @@ features = [
     "Win32_Storage",
     "Win32_Storage_FileSystem"
 ]
-
-[dependencies.serde]
-version = "1.0"
-features = ["derive"]
 
 [dependencies.serde_json]
 version = "1.0"

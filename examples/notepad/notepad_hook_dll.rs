@@ -135,9 +135,9 @@ unsafe fn install_hook() -> bool {
             Ok((trampoline, target)) => {
                 // Store original function
                 ORIGINAL_MESSAGEBOX_W = Some(std::mem::transmute::<
-                    *mut std::ffi::c_void,
+                    *mut c_void,
                     unsafe extern "system" fn(
-                        *mut std::ffi::c_void,
+                        *mut c_void,
                         *const u16,
                         *const u16,
                         u32,
