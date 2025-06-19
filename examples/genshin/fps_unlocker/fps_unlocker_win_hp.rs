@@ -419,7 +419,7 @@ fn main() {
         }
     };
 
-    let process_path = game_path.as_str(); // 修复：使用 as_str() 转换为 &str
+    let process_path = game_path.as_str();
     let process_dir = Path::new(process_path).parent().unwrap().to_str().unwrap();
     let procname = Path::new(process_path)
         .file_name()
@@ -441,7 +441,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Start game process - 修复：直接使用 &str
+    // Start game process
     let process_path_cstr = std::ffi::CString::new(process_path).unwrap();
     let process_dir_cstr = std::ffi::CString::new(process_dir).unwrap();
 
