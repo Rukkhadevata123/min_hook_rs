@@ -544,6 +544,8 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     println!("Genshin Impact FPS Unlocker - DLL Injection Version");
+    println!("https://github.com/Rukkhadevata123/min_hook_rs");
+    println!("https://github.com/34736384/genshin-fps-unlock");
     println!("Using SetWindowsHookEx injection like C# version\n");
 
     if args.len() != 4 {

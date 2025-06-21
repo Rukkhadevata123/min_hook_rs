@@ -400,7 +400,8 @@ fn format_current_time() -> String {
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    println!("FPS Unlocker - If helpful please star the repo v5.5");
+    println!("FPS Unlocker - If helpful please star the repos!");
+    println!("https://github.com/Rukkhadevata123/min_hook_rs");
     println!("https://github.com/xiaonian233/genshin-fps-unlock");
     println!("Special thanks to winTEuser\n");
 
