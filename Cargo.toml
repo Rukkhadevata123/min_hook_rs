@@ -84,12 +84,12 @@ path = "examples/notepad/notepad_injector.rs"
 # Genshin Examples
 [[example]]
 name = "genshin_bili_dll"
-path = "examples/genshin/genshin_bili_dll.rs"
+path = "examples/genshin/bilibili/genshin_bili_dll.rs"
 crate-type = ["cdylib"]
 
 [[example]]
 name = "genshin_bili_injector"
-path = "examples/genshin/genshin_bili_injector.rs"
+path = "examples/genshin/bilibili/genshin_bili_injector.rs"
 
 [[example]]
 name = "fps_unlocker_wine"
