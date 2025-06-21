@@ -20,6 +20,10 @@ windows-sys = { version = "0.60", features = [
 ## Quick Start
 
 ```rust
+//! Basic MessageBox Hook Example
+//!
+//! Simple MessageBoxA Hook demonstration showing before/after comparison
+
 use min_hook_rs::*;
 use std::ffi::c_void;
 use std::ptr;
@@ -27,43 +31,233 @@ use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use windows_sys::core::PCSTR;
 
+// MessageBoxA function signature
 type MessageBoxAFn = unsafe extern "system" fn(HWND, PCSTR, PCSTR, u32) -> i32;
+
+// Store original function pointer
 static mut ORIGINAL_MESSAGEBOX: Option<MessageBoxAFn> = None;
 
-unsafe extern "system" fn hooked_messagebox(
-    hwnd: HWND, _text: PCSTR, _caption: PCSTR, utype: u32
+// Hook function - modify message content
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn hooked_messagebox(
+    hwnd: HWND,
+    _text: PCSTR,
+    _caption: PCSTR,
+    _utype: u32,
 ) -> i32 {
-    let new_text = "Hooked by MinHook-rs!\0";
-    let new_caption = "Hook Demo\0";
-    
-    let original = ptr::addr_of!(ORIGINAL_MESSAGEBOX).read().unwrap();
-    original(hwnd, new_text.as_ptr(), new_caption.as_ptr(), utype)
+    println!("[HOOK] MessageBoxA intercepted!");
+
+    // Modified message content
+    let new_text = "MinHook-rs intercepted this message!\0";
+    let new_caption = "[HOOKED] Demo\0";
+
+    // Call original function
+    unsafe {
+        let original_ptr = ptr::addr_of!(ORIGINAL_MESSAGEBOX).read();
+
+        match original_ptr {
+            Some(original_fn) => original_fn(
+                hwnd,
+                new_text.as_ptr(),
+                new_caption.as_ptr(),
+                MB_ICONWARNING,
+            ),
+            None => {
+                // Fallback to system MessageBoxA
+                MessageBoxA(
+                    hwnd,
+                    new_text.as_ptr(),
+                    new_caption.as_ptr(),
+                    MB_ICONWARNING,
+                )
+            }
+        }
+    }
+}
+
+// Test MessageBox call
+fn show_test_message(title: &str, message: &str, description: &str) {
+    println!("{}", description);
+
+    let title_c = format!("{}\0", title);
+    let message_c = format!("{}\0", message);
+
+    unsafe {
+        MessageBoxA(
+            ptr::null_mut(),
+            message_c.as_ptr(),
+            title_c.as_ptr(),
+            MB_ICONINFORMATION,
+        );
+    }
 }
 
 fn main() -> Result<()> {
+    println!("MinHook-rs MessageBox Hook Demo");
+    println!("================================");
+
+    if !is_supported() {
+        eprintln!("Error: Only supports x64 Windows!");
+        return Ok(());
+    }
+
+    // Phase 1: Test original behavior
+    println!("\n[PHASE 1] Testing original MessageBox behavior");
+    show_test_message(
+        "Original Behavior",
+        "This is the original MessageBoxA call.\nNo hook is active.",
+        "Showing original MessageBox...",
+    );
+
+    // Phase 2: Initialize and create hook
+    println!("\n[PHASE 2] Installing hook");
+    println!("Initializing MinHook...");
     initialize()?;
 
-    let (trampoline, target) = create_hook_api(
-        "user32", 
-        "MessageBoxA", 
-        hooked_messagebox as *mut c_void
-    )?;
+    println!("Creating MessageBoxA hook...");
+    let (trampoline, target) =
+        create_hook_api("user32", "MessageBoxA", hooked_messagebox as *mut c_void)?;
 
     unsafe {
         ORIGINAL_MESSAGEBOX = Some(std::mem::transmute(trampoline));
     }
 
+    println!("Enabling hook...");
     enable_hook(target)?;
+    println!("Hook activated successfully!");
 
-    unsafe {
-        MessageBoxA(ptr::null_mut(), "Test\0".as_ptr(), "Title\0".as_ptr(), MB_OK);
-    }
+    // Phase 3: Test hook effect
+    println!("\n[PHASE 3] Testing hook effect");
+    show_test_message(
+        "Test Message",
+        "This message should be intercepted and modified!",
+        "Showing hooked MessageBox...",
+    );
 
+    // Phase 4: Multiple tests for stability
+    println!("\n[PHASE 4] Testing hook stability");
+    show_test_message("Second Test", "Second call test", "Second hook test...");
+    show_test_message("Third Test", "Third call test", "Third hook test...");
+
+    // Phase 5: Disable hook
+    println!("\n[PHASE 5] Disabling hook");
     disable_hook(target)?;
+    println!("Hook disabled");
+
+    // Phase 6: Verify hook is disabled
+    println!("\n[PHASE 6] Verifying hook is disabled");
+    show_test_message(
+        "Hook Disabled",
+        "This message should show normal content.\nHook has been disabled.",
+        "Showing normal MessageBox after disable...",
+    );
+
+    // Phase 7: Cleanup
+    println!("\n[PHASE 7] Cleanup");
     remove_hook(target)?;
     uninitialize()?;
+    println!("Cleanup completed");
+
+    println!("\nDemo completed successfully!");
+    println!("\nSummary:");
+    println!("- Original behavior: Normal MessageBox");
+    println!("- Hook active: Message intercepted and modified");
+    println!("- Hook disabled: Normal behavior restored");
+    println!("- Complete cleanup: System returned to initial state");
+
     Ok(())
 }
+```
+
+The output may be
+
+```plaintext
+MinHook-rs MessageBox Hook Demo                                                                                                                                     
+================================
+
+[PHASE 1] Testing original MessageBox behavior
+Showing original MessageBox...
+
+[PHASE 2] Installing hook
+Initializing MinHook...
+Creating MessageBoxA hook...
+Enabling hook...
+Hook activated successfully!
+
+[PHASE 3] Testing hook effect
+Showing hooked MessageBox...
+[HOOK] MessageBoxA intercepted!
+
+[PHASE 4] Testing hook stability
+Second hook test...
+[HOOK] MessageBoxA intercepted!
+Third hook test...
+[HOOK] MessageBoxA intercepted!
+
+[PHASE 5] Disabling hook
+Hook disabled
+
+[PHASE 6] Verifying hook is disabled
+Showing normal MessageBox after disable...
+
+[PHASE 7] Cleanup
+Cleanup completed
+
+Demo completed successfully!
+
+Summary:
+- Original behavior: Normal MessageBox
+- Hook active: Message intercepted and modified
+- Hook disabled: Normal behavior restored
+- Complete cleanup: System returned to initial state
+```
+
+## Examples
+
+### Basic Hook Example
+
+Run the comprehensive demonstration example:
+
+```bash
+cargo run --example basic_hook
+```
+
+This example demonstrates all MinHook-rs features including basic hooks, multiple simultaneous hooks, dynamic enable/disable cycles, queued operations, error handling, and performance testing with detailed output.
+
+### DLL Hook Examples
+
+Complete DLL hooking workflow with injector and target programs:
+
+```bash
+# Build hook DLL and test programs
+cargo build --example simple_messagebox_hook --target x86_64-pc-windows-msvc --release
+cargo build --example simple_injector --target x86_64-pc-windows-msvc --release  
+cargo build --example messagebox_test --target x86_64-pc-windows-msvc --release
+
+# Start test program (displays several MessageBox dialogs)
+start target/x86_64-pc-windows-msvc/release/examples/messagebox_test.exe
+
+# Find process ID and inject hook DLL
+tasklist | findstr messagebox_test
+target/x86_64-pc-windows-msvc/release/examples/simple_injector.exe <PID> target/x86_64-pc-windows-msvc/release/examples/simple_messagebox_hook.dll
+```
+
+### Notepad Hook Example
+
+Real-world application hooking - intercepts Notepad's exit confirmation dialog:
+
+```bash
+# Build Notepad hook DLL and injector
+cargo build --example notepad_hook_dll --target x86_64-pc-windows-msvc --release
+cargo build --example notepad_injector --target x86_64-pc-windows-msvc --release
+
+# Start Notepad and inject hook
+notepad.exe &
+tasklist | findstr notepad
+target/x86_64-pc-windows-msvc/release/examples/notepad_injector.exe <PID> target/x86_64-pc-windows-msvc/release/examples/notepad_hook_dll.dll
+
+# Test: Type text in Notepad, try to close without saving
+# You'll see a custom hook message instead of normal save dialog
 ```
 
 ## API Reference
@@ -110,7 +304,7 @@ can_hook_safely(code: &[u8], hook_size: usize) -> bool
 status_to_string(error: HookError) -> &'static str
 ```
 
-## Examples
+## Usage Patterns
 
 ### Hook by Address
 
@@ -177,16 +371,6 @@ match create_hook_api("user32", "MessageBoxA", hook_fn as *mut c_void) {
     Err(HookError::FunctionNotFound) => println!("Function not found"),
     Err(e) => println!("Error: {}", status_to_string(e)),
 }
-```
-
-## Running Examples
-
-```bash
-# Windows native
-cargo run --example basic_hook
-
-# Cross-compilation
-cargo build --example basic_hook --target x86_64-pc-windows-msvc --release
 ```
 
 ## x86_64 Instruction Format
