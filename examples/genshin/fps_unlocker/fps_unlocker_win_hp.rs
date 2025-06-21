@@ -1,7 +1,7 @@
-//! Genshin Impact FPS Unlocker - Windows High Performance version (Stage 2 Only)
+//! Genshin Impact FPS Unlocker - Windows High Performance version
 //!
-//! Test version with ONLY shellcode injection (no direct WriteProcessMemory)
-//! For comparing the effectiveness of dual-write vs shellcode-only approach
+//! Enhanced version with dual-write mechanism and shellcode injection
+//! Based on C++ version with exact behavior replication
 //!
 //! Acknowledge https://github.com/xiaonian233/genshin-fps-unlock
 //! Special thanks to winTEuser for shellcode implementation
@@ -267,7 +267,7 @@ fn get_module(pid: u32, module_name: &str) -> Option<(usize, u32)> {
     }
 }
 
-//Hotpatch - Same as original
+//Hotpatch
 fn inject_patch(
     text_buffer: *const u8,
     text_size: u32,
@@ -400,7 +400,7 @@ fn format_current_time() -> String {
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    println!("FPS Unlocker (Stage 2 Only) - Testing shellcode-only approach");
+    println!("FPS Unlocker - If helpful please star the repos!");
     println!("https://github.com/Rukkhadevata123/min_hook_rs");
     println!("https://github.com/xiaonian233/genshin-fps-unlock");
     println!("Special thanks to winTEuser\n");
@@ -485,7 +485,7 @@ fn main() {
         while times != 0 {
             if let Some((base, size)) = get_module(pi.dwProcessId, procname) {
                 h_main_module = Some((base, size));
-                break;
+                break; // goto __get_procbase_ok;
             }
             thread::sleep(Duration::from_millis(50));
             times -= 5;
@@ -567,7 +567,7 @@ fn main() {
                 if *(sec_temp.Name.as_ptr() as *const u64) == tar_sec {
                     text_remote_rva = main_base + sec_temp.VirtualAddress as usize;
                     text_vsize = sec_temp.Misc.VirtualSize;
-                    break;
+                    break; // goto __Get_target_sec;
                 }
                 num -= 1;
             }
@@ -638,7 +638,6 @@ fn main() {
 
         println!("FPS variable address: 0x{:X}", pfps);
 
-        // STAGE 2 ONLY: Inject shellcode patch
         let patch_ptr = inject_patch(
             copy_text_va as *const u8,
             text_vsize,
@@ -646,24 +645,19 @@ fn main() {
             pfps,
             pi.hProcess,
             &target_fps,
-        );
+        ); //patch inject 
 
         if patch_ptr == 0 {
             println!("Inject Patch Fail!\n");
-            VirtualFree(mbase_pe_buffer, 0, MEM_RELEASE);
-            VirtualFree(copy_text_va, 0, MEM_RELEASE);
-            CloseHandle(pi.hProcess);
-            std::process::exit(-1);
         }
 
         VirtualFree(mbase_pe_buffer, 0, MEM_RELEASE);
         VirtualFree(copy_text_va, 0, MEM_RELEASE);
-        println!("FPS unlocked successfully! (Shellcode-only approach)");
-        println!("Stage 2 injection active - monitoring will show reads only (no direct writes):");
+        println!("FPS unlocked successfully!");
         println!("Monitoring (Press Ctrl+C to exit):\n");
 
         let mut dw_exit_code = STILL_ACTIVE;
-        let mut counter = 0;
+        let mut counter = 0; // Add counter
 
         while dw_exit_code == STILL_ACTIVE {
             GetExitCodeProcess(pi.hProcess, &mut dw_exit_code as *mut _ as *mut u32);
@@ -682,7 +676,7 @@ fn main() {
                 &mut bytes_read,
             ) != 0
             {
-                // Successfully read FPS value
+                // Successfully read FPS value - add timestamp display
                 let time_str = format_current_time();
 
                 if fps == -1 {
@@ -692,15 +686,21 @@ fn main() {
                     continue;
                 }
 
-                // STAGE 2 ONLY: No direct WriteProcessMemory - only monitoring
                 if fps != target_fps {
                     println!(
-                        "\n[{}] FPS deviation detected: {} (target: {}) - SHELLCODE SHOULD HANDLE THIS",
+                        "\n[{}] FPS changed detected ({} -> {}), resetting...",
                         time_str, fps, target_fps
                     );
 
-                    // Update shellcode's target value (only the patch buffer)
                     let mut bytes_written = 0;
+                    WriteProcessMemory(
+                        pi.hProcess,
+                        pfps as *mut _,
+                        &target_fps as *const _ as *const _,
+                        mem::size_of::<i32>(),
+                        &mut bytes_written,
+                    );
+                    //Hot patch loop
                     WriteProcessMemory(
                         pi.hProcess,
                         patch_ptr as *mut _,
@@ -708,19 +708,17 @@ fn main() {
                         4,
                         &mut bytes_written,
                     );
-
-                    println!("    -> Shellcode target updated, let it handle the sync...");
                 } else {
-                    // Display current FPS status
+                    // Display current FPS status (similar to C version)
                     print!(
-                        "[{}] FPS stable: {} (Check #{}) [SHELLCODE WORKING]\r",
+                        "[{}] FPS maintained: {} (Check #{})\r",
                         time_str, fps, counter
                     );
                     use std::io::Write;
                     std::io::stdout().flush().unwrap();
                 }
             } else {
-                // Read failure warning
+                // Read failure warning (similar to C version)
                 let time_str = format_current_time();
                 println!(
                     "\n[{}] Warning: Failed to read FPS value (Check #{}): {}",
