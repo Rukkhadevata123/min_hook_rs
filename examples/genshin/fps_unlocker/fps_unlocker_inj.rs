@@ -551,7 +551,7 @@ fn main() {
     if args.len() != 4 {
         eprintln!("Usage: {} <GamePath> <DllPath> <FPS>", args[0]);
         eprintln!(
-            "Example: {} \"C:\\Games\\YuanShen.exe\" \"fps_unlocker_dll.dll\" 144",
+            "Example: {} \"D:\\Program Files\\Genshin Impact\\Genshin Impact Game\\YuanShen.exe\" \"fps_unlocker_dll.dll\" 144",
             args[0]
         );
         return;

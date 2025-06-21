@@ -184,7 +184,10 @@ fn main() {
 
     if args.len() != 3 {
         eprintln!("Usage: {} <GamePath> <FPS>", args[0]);
-        eprintln!("Example: {} \"C:\\Games\\YuanShen.exe\" 144", args[0]);
+        eprintln!(
+            "Example: {} \"D:\\Program Files\\Genshin Impact\\Genshin Impact Game\\YuanShen.exe\" 144",
+            args[0]
+        );
         std::process::exit(1);
     }
 
