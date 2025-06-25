@@ -59,23 +59,6 @@ struct IslandEnvironment {
     BOOL RedirectCombineEntry;
 };
 
-// 命令枚举，便于 switch 使用
-enum class CommandType {
-    FPS,
-    FOV,
-    FOG,
-    BANNER,
-    TEAM,
-    CAMERA,
-    DAMAGE,
-    TOUCH,
-    CRAFT,
-    STATUS,
-    RESET,
-    HELP,
-    UNKNOWN
-};
-
 class HutaoInjector {
 private:
     static constexpr LPCWSTR SHARED_MEMORY_NAME = L"4F3E8543-40F7-4808-82DC-21E48A6037A7";
@@ -107,27 +90,11 @@ private:
     DWORD processId;
     std::atomic<bool> gameRunning;
     std::thread monitorThread;
-
-    // 命令字符串到枚举的映射
-    CommandType GetCommandType(const std::string& cmd) {
-        if (cmd == "fps") return CommandType::FPS;
-        if (cmd == "fov") return CommandType::FOV;
-        if (cmd == "fog") return CommandType::FOG;
-        if (cmd == "banner") return CommandType::BANNER;
-        if (cmd == "team") return CommandType::TEAM;
-        if (cmd == "camera") return CommandType::CAMERA;
-        if (cmd == "damage") return CommandType::DAMAGE;
-        if (cmd == "touch") return CommandType::TOUCH;
-        if (cmd == "craft") return CommandType::CRAFT;
-        if (cmd == "status") return CommandType::STATUS;
-        if (cmd == "reset") return CommandType::RESET;
-        if (cmd == "help" || cmd == "?") return CommandType::HELP;
-        return CommandType::UNKNOWN;
-    }
+    std::atomic<bool> shouldQuit;
 
 public:
     HutaoInjector() : hMemoryMappedFile(nullptr), pSharedMemory(nullptr), 
-                     hProcess(nullptr), processId(0), gameRunning(false) {}
+                     hProcess(nullptr), processId(0), gameRunning(false), shouldQuit(false) {}
 
     ~HutaoInjector() {
         Cleanup();
@@ -159,6 +126,7 @@ public:
 
         // Start monitoring thread
         gameRunning = true;
+        shouldQuit = false;
         monitorThread = std::thread(&HutaoInjector::MonitorGameProcess, this);
 
         return true;
@@ -170,20 +138,20 @@ public:
         std::cout << "Monitoring game process (PID: " << processId << ")..." << std::endl;
 
         std::string input;
-        while (true) {  // 改为无限循环，不依赖 gameRunning
+        while (!shouldQuit) {
             std::cout << "hutao> ";
             if (!std::getline(std::cin, input)) {
-                break;  // EOF 或输入流关闭
+                break;  // EOF or input stream closed
             }
             
             if (!input.empty()) {
                 if (input == "quit" || input == "exit") {
                     std::cout << "Restoring defaults and preparing to exit..." << std::endl;
                     
-                    // 使用统一的reset方法
+                    // Use unified reset method
                     ProcessCommand("reset");
                     
-                    // 设置为停止状态并执行清理
+                    // Set to stopped state and execute cleanup
                     if (pSharedMemory) {
                         static_cast<IslandEnvironment*>(pSharedMemory)->State = IslandState::Stopped;
                     }
@@ -194,7 +162,7 @@ public:
                 ProcessCommand(input);
             }
             
-            // 每次命令后检查游戏状态
+            // Check game status after each command
             CheckGameStatus();
         }
 
@@ -218,7 +186,7 @@ private:
         );
 
         if (!hMemoryMappedFile) {
-            std::wcerr << L"Failed to create memory mapped file: " << GetLastError() << std::endl;
+            std::cout << "Failed to create memory mapped file: " << GetLastError() << std::endl;
             return false;
         }
 
@@ -231,7 +199,7 @@ private:
         );
 
         if (!pSharedMemory) {
-            std::wcerr << L"Failed to map view of file: " << GetLastError() << std::endl;
+            std::cout << "Failed to map view of file: " << GetLastError() << std::endl;
             return false;
         }
 
@@ -262,10 +230,10 @@ private:
         pEnv->RedirectCombineEntry = redirectCombine ? TRUE : FALSE;
         pEnv->State = IslandState::Started;
 
-        std::wcout << L"\n[OK] Initial configuration applied:" << std::endl;
-        std::wcout << L"  - FPS: " << fps << (enableFps ? L" (enabled)" : L" (disabled)") << std::endl;
-        std::wcout << L"  - FOV: " << fov << (enableFov ? L" (enabled)" : L" (disabled)") << std::endl;
-        std::wcout << L"  - Other settings configured" << std::endl;
+        std::cout << "\n[OK] Initial configuration applied:" << std::endl;
+        std::cout << "  - FPS: " << fps << (enableFps ? " (enabled)" : " (disabled)") << std::endl;
+        std::cout << "  - FOV: " << fov << (enableFov ? " (enabled)" : " (disabled)") << std::endl;
+        std::cout << "  - Other settings configured" << std::endl;
     }
 
     bool LaunchGame(const std::string& gamePath) {
@@ -289,7 +257,7 @@ private:
             gameDir.c_str(),
             &si,
             &pi)) {
-            std::wcerr << L"Failed to launch game. Error: " << GetLastError() << std::endl;
+            std::cout << "Failed to launch game. Error: " << GetLastError() << std::endl;
             return false;
         }
 
@@ -308,15 +276,16 @@ private:
 
     bool InjectDLLWithHook(const std::wstring& dllPath) {
         if (processId == 0) {
-            std::wcerr << L"No target process identified" << std::endl;
+            std::cout << "No target process identified" << std::endl;
             return false;
         }
 
-        std::wcout << L"Injecting DLL via SetWindowsHookEx: " << dllPath << std::endl;
+        std::cout << "Injecting DLL via SetWindowsHookEx: ";
+        std::wcout << dllPath << std::endl;
 
         HMODULE hDll = LoadLibraryW(dllPath.c_str());
         if (!hDll) {
-            std::wcerr << L"Failed to load DLL locally: " << GetLastError() << std::endl;
+            std::cout << "Failed to load DLL locally: " << GetLastError() << std::endl;
             return false;
         }
 
@@ -327,16 +296,16 @@ private:
         }
 
         if (pGetHook && SUCCEEDED(pGetHook(&hookProc))) {
-            std::wcout << L"Hook function retrieved from DLL" << std::endl;
+            std::cout << "Hook function retrieved from DLL" << std::endl;
         } else {
-            std::wcerr << L"Failed to get hook function from DLL" << std::endl;
+            std::cout << "Failed to get hook function from DLL" << std::endl;
             FreeLibrary(hDll);
             return false;
         }
 
         DWORD threadId = GetMainThreadId(processId);
         if (threadId == 0) {
-            std::wcerr << L"Failed to get main thread ID" << std::endl;
+            std::cout << "Failed to get main thread ID" << std::endl;
             FreeLibrary(hDll);
             return false;
         }
@@ -344,7 +313,7 @@ private:
         HHOOK hHook = SetWindowsHookExW(WH_GETMESSAGE, hookProc, hDll, threadId);
         if (!hHook) {
             DWORD error = GetLastError();
-            std::wcerr << L"SetWindowsHookEx failed: " << error << std::endl;
+            std::cout << "SetWindowsHookEx failed: " << error << std::endl;
             FreeLibrary(hDll);
             return false;
         }
@@ -352,7 +321,7 @@ private:
         PostThreadMessageW(threadId, WM_NULL, 0, 0);
         Sleep(500);
 
-        std::wcout << L"[OK] DLL injected successfully" << std::endl;
+        std::cout << "[OK] DLL injected successfully" << std::endl;
 
         UnhookWindowsHookEx(hHook);
         FreeLibrary(hDll);
@@ -360,42 +329,45 @@ private:
         return true;
     }
 
-    // 简化的监控线程，只负责设置 gameRunning 状态
+    // Simplified monitoring thread, only responsible for setting gameRunning status
     void MonitorGameProcess() {
-        while (gameRunning) {
+        while (gameRunning && !shouldQuit) {
             DWORD exitCode;
             if (!GetExitCodeProcess(hProcess, &exitCode) || exitCode != STILL_ACTIVE) {
                 gameRunning = false;
+                shouldQuit = true;
                 break;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // 降低检查频率
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // Lower check frequency
         }
     }
 
-    // 统一的游戏状态检查函数
+    // Unified game status check function
     void CheckGameStatus() {
         if (!hProcess) return;
         
         DWORD exitCode;
         if (!GetExitCodeProcess(hProcess, &exitCode) || exitCode != STILL_ACTIVE) {
-            if (gameRunning.exchange(false)) { // 只在第一次检测到退出时执行
-                std::cout << "\n[INFO] Game process has exited! Restoring defaults..." << std::endl;
+            if (gameRunning.exchange(false)) { // Only execute when first detecting exit
+                std::cout << "\n[INFO] Game process has exited! Executing automatic quit..." << std::endl;
                 
-                // 使用统一的reset方法恢复默认值
+                // Apply defaults through unified reset method
                 if (pSharedMemory) {
                     ApplyDefaults(static_cast<IslandEnvironment*>(pSharedMemory));
                     std::cout << "[INFO] Game settings restored to defaults." << std::endl;
-                    std::cout << "The configuration tool will continue running. Type 'quit' to exit." << std::endl;
                 }
+                
+                // Set quit flag to exit main loop
+                shouldQuit = true;
             }
         }
     }
 
-    // 统一的默认值应用函数
+    // Unified default value application function
     void ApplyDefaults(IslandEnvironment* pEnv) {
         if (!pEnv) return;
         
-        // 直接设置默认值，不使用递归调用
+        // Directly set default values, do not use recursive calls
         pEnv->TargetFrameRate = 60;
         pEnv->EnableSetTargetFrameRate = TRUE;
         pEnv->FieldOfView = 45.0f;
@@ -408,7 +380,7 @@ private:
         pEnv->UsingTouchScreen = FALSE;
         pEnv->RedirectCombineEntry = FALSE;
         
-        // 保持运行状态，除非明确要求停止
+        // Maintain running state unless explicitly requested to stop
         if (pEnv->State != IslandState::Stopped) {
             pEnv->State = IslandState::Started;
         }
@@ -422,128 +394,102 @@ private:
         std::string cmd;
         iss >> cmd;
 
-        CommandType cmdType = GetCommandType(cmd);
-
-        switch (cmdType) {
-            case CommandType::FPS: {
-                int value;
-                if (iss >> value) {
-                    pEnv->TargetFrameRate = value;
-                    pEnv->EnableSetTargetFrameRate = TRUE;
-                    std::cout << "FPS set to: " << value << " (enabled)" << std::endl;
-                } else {
-                    std::cout << "Usage: fps <value> - Set target frame rate (e.g., fps 120)" << std::endl;
-                }
-                break;
+        if (cmd == "fps") {
+            int value;
+            if (iss >> value) {
+                pEnv->TargetFrameRate = value;
+                pEnv->EnableSetTargetFrameRate = TRUE;
+                std::cout << "FPS set to: " << value << " (enabled)" << std::endl;
+            } else {
+                std::cout << "Usage: fps <value> - Set target frame rate (e.g., fps 120)" << std::endl;
             }
-            
-            case CommandType::FOV: {
-                float value;
-                if (iss >> value) {
-                    pEnv->FieldOfView = value;
-                    pEnv->EnableSetFieldOfView = TRUE;
-                    std::cout << "FOV set to: " << value << " (enabled)" << std::endl;
-                } else {
-                    std::cout << "Usage: fov <value> - Set field of view (e.g., fov 60.0)" << std::endl;
-                }
-                break;
+        }
+        else if (cmd == "fov") {
+            float value;
+            if (iss >> value) {
+                pEnv->FieldOfView = value;
+                pEnv->EnableSetFieldOfView = TRUE;
+                std::cout << "FOV set to: " << value << " (enabled)" << std::endl;
+            } else {
+                std::cout << "Usage: fov <value> - Set field of view (e.g., fov 60.0)" << std::endl;
             }
-            
-            case CommandType::FOG: {
-                std::string state;
-                if (iss >> state) {
-                    pEnv->DisableFog = (state == "off" || state == "disable") ? TRUE : FALSE;
-                    std::cout << "Fog rendering: " << (pEnv->DisableFog ? "disabled" : "enabled") << std::endl;
-                } else {
-                    std::cout << "Usage: fog <on|off>" << std::endl;
-                }
-                break;
+        }
+        else if (cmd == "fog") {
+            std::string state;
+            if (iss >> state) {
+                pEnv->DisableFog = (state == "off" || state == "disable") ? TRUE : FALSE;
+                std::cout << "Fog rendering: " << (pEnv->DisableFog ? "disabled" : "enabled") << std::endl;
+            } else {
+                std::cout << "Usage: fog <on|off>" << std::endl;
             }
-            
-            case CommandType::BANNER: {
-                std::string state;
-                if (iss >> state) {
-                    pEnv->HideQuestBanner = (state == "hide") ? TRUE : FALSE;
-                    std::cout << "Quest banner: " << (pEnv->HideQuestBanner ? "hidden" : "visible") << std::endl;
-                } else {
-                    std::cout << "Usage: banner <show|hide>" << std::endl;
-                }
-                break;
+        }
+        else if (cmd == "banner") {
+            std::string state;
+            if (iss >> state) {
+                pEnv->HideQuestBanner = (state == "hide") ? TRUE : FALSE;
+                std::cout << "Quest banner: " << (pEnv->HideQuestBanner ? "hidden" : "visible") << std::endl;
+            } else {
+                std::cout << "Usage: banner <show|hide>" << std::endl;
             }
-            
-            case CommandType::TEAM: {
-                std::string state;
-                if (iss >> state) {
-                    pEnv->RemoveOpenTeamProgress = (state == "remove") ? TRUE : FALSE;
-                    std::cout << "Team animation: " << (pEnv->RemoveOpenTeamProgress ? "removed" : "normal") << std::endl;
-                } else {
-                    std::cout << "Usage: team <normal|remove>" << std::endl;
-                }
-                break;
+        }
+        else if (cmd == "team") {
+            std::string state;
+            if (iss >> state) {
+                pEnv->RemoveOpenTeamProgress = (state == "remove") ? TRUE : FALSE;
+                std::cout << "Team animation: " << (pEnv->RemoveOpenTeamProgress ? "removed" : "normal") << std::endl;
+            } else {
+                std::cout << "Usage: team <normal|remove>" << std::endl;
             }
-            
-            case CommandType::CAMERA: {
-                std::string state;
-                if (iss >> state) {
-                    pEnv->DisableEventCameraMove = (state == "disable") ? TRUE : FALSE;
-                    std::cout << "Event camera: " << (pEnv->DisableEventCameraMove ? "disabled" : "enabled") << std::endl;
-                } else {
-                    std::cout << "Usage: camera <enable|disable>" << std::endl;
-                }
-                break;
+        }
+        else if (cmd == "camera") {
+            std::string state;
+            if (iss >> state) {
+                pEnv->DisableEventCameraMove = (state == "disable") ? TRUE : FALSE;
+                std::cout << "Event camera: " << (pEnv->DisableEventCameraMove ? "disabled" : "enabled") << std::endl;
+            } else {
+                std::cout << "Usage: camera <enable|disable>" << std::endl;
             }
-            
-            case CommandType::DAMAGE: {
-                std::string state;
-                if (iss >> state) {
-                    pEnv->DisableShowDamageText = (state == "hide") ? TRUE : FALSE;
-                    std::cout << "Damage numbers: " << (pEnv->DisableShowDamageText ? "hidden" : "visible") << std::endl;
-                } else {
-                    std::cout << "Usage: damage <show|hide>" << std::endl;
-                }
-                break;
+        }
+        else if (cmd == "damage") {
+            std::string state;
+            if (iss >> state) {
+                pEnv->DisableShowDamageText = (state == "hide") ? TRUE : FALSE;
+                std::cout << "Damage numbers: " << (pEnv->DisableShowDamageText ? "hidden" : "visible") << std::endl;
+            } else {
+                std::cout << "Usage: damage <show|hide>" << std::endl;
             }
-            
-            case CommandType::TOUCH: {
-                std::string state;
-                if (iss >> state) {
-                    pEnv->UsingTouchScreen = (state == "on") ? TRUE : FALSE;
-                    std::cout << "Touch screen: " << (pEnv->UsingTouchScreen ? "enabled" : "disabled") << std::endl;
-                } else {
-                    std::cout << "Usage: touch <on|off>" << std::endl;
-                }
-                break;
+        }
+        else if (cmd == "touch") {
+            std::string state;
+            if (iss >> state) {
+                pEnv->UsingTouchScreen = (state == "on") ? TRUE : FALSE;
+                std::cout << "Touch screen: " << (pEnv->UsingTouchScreen ? "enabled" : "disabled") << std::endl;
+            } else {
+                std::cout << "Usage: touch <on|off>" << std::endl;
             }
-            
-            case CommandType::CRAFT: {
-                std::string state;
-                if (iss >> state) {
-                    pEnv->RedirectCombineEntry = (state == "redirect") ? TRUE : FALSE;
-                    std::cout << "Crafting table: " << (pEnv->RedirectCombineEntry ? "redirected to synthesis" : "normal") << std::endl;
-                } else {
-                    std::cout << "Usage: craft <normal|redirect>" << std::endl;
-                }
-                break;
+        }
+        else if (cmd == "craft") {
+            std::string state;
+            if (iss >> state) {
+                pEnv->RedirectCombineEntry = (state == "redirect") ? TRUE : FALSE;
+                std::cout << "Crafting table: " << (pEnv->RedirectCombineEntry ? "redirected to synthesis" : "normal") << std::endl;
+            } else {
+                std::cout << "Usage: craft <normal|redirect>" << std::endl;
             }
-            
-            case CommandType::STATUS:
-                ShowStatus(pEnv);
-                break;
-                
-            case CommandType::RESET:
-                std::cout << "Resetting all settings to default values..." << std::endl;
-                ApplyDefaults(pEnv);
-                std::cout << "[OK] All settings have been reset to defaults" << std::endl;
-                break;
-                
-            case CommandType::HELP:
-                ShowHelp();
-                break;
-                
-            case CommandType::UNKNOWN:
-            default:
-                std::cout << "Unknown command: '" << cmd << "'. Type 'help' for available commands." << std::endl;
-                break;
+        }
+        else if (cmd == "status") {
+            ShowStatus(pEnv);
+        }
+        else if (cmd == "reset") {
+            std::cout << "Resetting all settings to default values..." << std::endl;
+            ApplyDefaults(pEnv);
+            std::cout << "[OK] All settings have been reset to defaults" << std::endl;
+        }
+        else if (cmd == "help" || cmd == "?") {
+            ShowHelp();
+        }
+        else {
+            std::cout << "Unknown command: '" << cmd << "'. Type 'help' for available commands." << std::endl;
         }
     }
 
@@ -584,8 +530,9 @@ private:
         std::cout << "[Cleanup] Starting cleanup process..." << std::endl;
         
         gameRunning = false;
+        shouldQuit = true;
         
-        // 等待监控线程结束
+        // Wait for monitor thread to finish
         if (monitorThread.joinable()) {
             std::cout << "[Cleanup] Waiting for monitor thread to finish..." << std::endl;
             monitorThread.join();
@@ -596,7 +543,7 @@ private:
             std::cout << "[Cleanup] Restoring defaults..." << std::endl;
             IslandEnvironment* pEnv = static_cast<IslandEnvironment*>(pSharedMemory);
             
-            // 使用统一的默认值恢复方法
+            // Use unified default value restoration method
             ApplyDefaults(pEnv);
             pEnv->State = IslandState::Stopped;
             
@@ -622,19 +569,20 @@ private:
 
     // Helper functions
     bool WaitForMainModule(const std::wstring& exeName) {
-        std::wcout << L"Waiting for main module: " << exeName << std::endl;
+        std::cout << "Waiting for main module: ";
+        std::wcout << exeName << std::endl;
         
         int timeout = 300;
         while (timeout > 0) {
             if (GetMainModuleInfo(exeName)) {
-                std::wcout << L"Main module loaded successfully" << std::endl;
+                std::cout << "Main module loaded successfully" << std::endl;
                 return true;
             }
             Sleep(100);
             timeout--;
         }
 
-        std::wcout << L"Timeout waiting for main module!" << std::endl;
+        std::cout << "Timeout waiting for main module!" << std::endl;
         return false;
     }
 

@@ -255,14 +255,11 @@ VOID MickeyWonderCombineEntryEndpoint(LPVOID pThis) {
     originals.MickeyWonderCombineEntry(pThis);
 }
 
-// MinHook 安装函数
 bool InstallMinHooks(UINT64 base, IslandEnvironment* pEnvironment) {
-    // 初始化 MinHook
     if (MH_Initialize() != MH_OK) {
         return false;
     }
 
-    // 计算目标函数地址并创建 hook
     LPVOID pTarget;
     MH_STATUS status;
 
@@ -301,7 +298,6 @@ bool InstallMinHooks(UINT64 base, IslandEnvironment* pEnvironment) {
     status = MH_CreateHook(pTarget, MickeyWonderCombineEntryEndpoint, (LPVOID*)&originals.MickeyWonderCombineEntry);
     if (status != MH_OK) return false;
 
-    // 同时设置不需要 hook 但需要调用的函数指针
     originals.MickeyWonder = reinterpret_cast<MickeyWonderMethod>(base + pEnvironment->FunctionOffsets.MickeyWonder);
     originals.MickeyWonderPartner = reinterpret_cast<MickeyWonderMethodPartner>(base + pEnvironment->FunctionOffsets.MickeyWonderPartner);
     originals.SetEnableFogRendering = reinterpret_cast<SetEnableFogRenderingMethod>(base + pEnvironment->FunctionOffsets.SetEnableFogRendering);
@@ -313,7 +309,6 @@ bool InstallMinHooks(UINT64 base, IslandEnvironment* pEnvironment) {
     originals.SwitchInputDeviceToTouchScreen = reinterpret_cast<SwitchInputDeviceToTouchScreenMethod>(base + pEnvironment->FunctionOffsets.SwitchInputDeviceToTouchScreen);
     originals.MickeyWonderCombineEntryPartner = reinterpret_cast<MickeyWonderCombineEntryMethodPartner>(base + pEnvironment->FunctionOffsets.MickeyWonderCombineEntryPartner);
 
-    // 启用所有 hook
     status = MH_EnableHook(MH_ALL_HOOKS);
     if (status != MH_OK) {
         MH_Uninitialize();

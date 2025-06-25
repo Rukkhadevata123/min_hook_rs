@@ -85,6 +85,15 @@ path = "examples/notepad/notepad_injector.rs"
 # Genshin Examples
 
 [[example]]
+name = "hutao_minhook"
+path = "examples/genshin/hutao/rust/hutao_minhook.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "hutao_injector"
+path = "examples/genshin/hutao/rust/hutao_injector.rs"
+
+[[example]]
 name = "genshin_bili_dll"
 path = "examples/genshin/bilibili/genshin_bili_dll.rs"
 crate-type = ["cdylib"]
