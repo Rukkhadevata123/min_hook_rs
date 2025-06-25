@@ -301,7 +301,7 @@ bool InstallMinHooks(UINT64 base, IslandEnvironment* env) {
     return TRUE;
 }
 
-// Static hook procedure
+// Hook procedure for exports
 static LRESULT WINAPI IslandGetWindowHookImpl(int code, WPARAM wParam, LPARAM lParam) {
     return CallNextHookEx(NULL, code, wParam, lParam);
 }
@@ -361,14 +361,10 @@ DWORD WINAPI IslandThread(LPVOID lpParam) {
     return 0;
 }
 
-// Export functions
+// Export functions - Updated following upstream changes
 extern "C" {
     __declspec(dllexport) HRESULT WINAPI DllGetWindowsHookForHutao(HOOKPROC* pHookProc) {
-        *pHookProc = IslandGetWindowHookImpl;
-        return S_OK;
-    }
-    
-    __declspec(dllexport) HRESULT WINAPI IslandGetWindowHook(HOOKPROC* pHookProc) {
+        // We don't handle package family checks - keep it simple
         *pHookProc = IslandGetWindowHookImpl;
         return S_OK;
     }

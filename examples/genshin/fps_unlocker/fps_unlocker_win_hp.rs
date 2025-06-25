@@ -376,10 +376,10 @@ fn inject_patch(
             }
             println!("Inject shellcode Fail!");
             VirtualFree(shellcode_buffer, 0, MEM_RELEASE);
-            return 0;
+            0
         } else {
             println!("Alloc shellcode space Fail!");
-            return 0;
+            0
         }
     }
 }

@@ -1,4 +1,3 @@
 EXPORTS
 DllGetWindowsHookForHutao
-IslandGetWindowHook
 IslandGetFunctionOffsetsSize
