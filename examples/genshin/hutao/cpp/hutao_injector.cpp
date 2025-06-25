@@ -58,7 +58,7 @@ struct IslandEnvironment {
 
 class HutaoInjector {
 private:
-    static constexpr LPCWSTR SHARED_MEMORY_NAME = L"4F3E8543-40F7-4808-82DC-21E48A6037A7";
+    static constexpr LPCSTR SHARED_MEMORY_NAME = "4F3E8543-40F7-4808-82DC-21E48A6037A7";
     
     // Chinese version offsets
     static constexpr FunctionOffsets ChineseOffsets = {
@@ -98,7 +98,7 @@ public:
         return CreatePersistentSharedMemory();
     }
 
-    bool LaunchAndInject(const std::string& gamePath, const std::wstring& dllPath,
+    bool LaunchAndInject(const std::string& gamePath, const std::string& dllPath,
                         float fov, int fps, bool enableFov, bool enableFps,
                         bool disableFog, bool fixLowFov, bool hideBanner, bool removeTeamAnim,
                         bool disableEventCamera, bool hideDamage, bool touchScreen, bool redirectCombine) {
@@ -154,7 +154,7 @@ private:
         sa.lpSecurityDescriptor = NULL;
         sa.bInheritHandle = TRUE;
 
-        hMemoryMappedFile = CreateFileMappingW(
+        hMemoryMappedFile = CreateFileMappingA(
             INVALID_HANDLE_VALUE,
             &sa,
             PAGE_READWRITE,
@@ -250,19 +250,18 @@ private:
         std::cout << "Waiting for game initialization..." << std::endl;
         Sleep(10000);
 
-        return WaitForMainModule(L"YuanShen.exe");
+        return WaitForMainModule("YuanShen.exe");
     }
 
-    bool InjectDLLWithHook(const std::wstring& dllPath) {
+    bool InjectDLLWithHook(const std::string& dllPath) {
         if (processId == 0) {
             std::cout << "No target process identified" << std::endl;
             return false;
         }
 
-        std::cout << "Injecting DLL via SetWindowsHookEx: ";
-        std::wcout << dllPath << std::endl;
+        std::cout << "Injecting DLL via SetWindowsHookEx: " << dllPath << std::endl;
 
-        HMODULE hDll = LoadLibraryW(dllPath.c_str());
+        HMODULE hDll = LoadLibraryA(dllPath.c_str());
         if (!hDll) {
             std::cout << "Failed to load DLL locally: " << GetLastError() << std::endl;
             return false;
@@ -289,7 +288,7 @@ private:
             return false;
         }
 
-        HHOOK hHook = SetWindowsHookExW(WH_GETMESSAGE, hookProc, hDll, threadId);
+        HHOOK hHook = SetWindowsHookExA(WH_GETMESSAGE, hookProc, hDll, threadId);
         if (!hHook) {
             DWORD error = GetLastError();
             std::cout << "SetWindowsHookEx failed: " << error << std::endl;
@@ -297,7 +296,7 @@ private:
             return false;
         }
 
-        PostThreadMessageW(threadId, WM_NULL, 0, 0);
+        PostThreadMessageA(threadId, WM_NULL, 0, 0);
         Sleep(500);
 
         std::cout << "[OK] DLL injected successfully" << std::endl;
@@ -499,9 +498,8 @@ private:
     }
 
     // Helper functions
-    bool WaitForMainModule(const std::wstring& exeName) {
-        std::cout << "Waiting for main module: ";
-        std::wcout << exeName << std::endl;
+    bool WaitForMainModule(const std::string& exeName) {
+        std::cout << "Waiting for main module: " << exeName << std::endl;
         
         int timeout = 300;
         while (timeout > 0) {
@@ -517,7 +515,7 @@ private:
         return false;
     }
 
-    bool GetMainModuleInfo(const std::wstring& exeName) {
+    bool GetMainModuleInfo(const std::string& exeName) {
         HMODULE hMods[1024];
         DWORD cbNeeded;
         
@@ -528,11 +526,11 @@ private:
         DWORD moduleCount = cbNeeded / sizeof(HMODULE);
         
         for (DWORD i = 0; i < moduleCount; i++) {
-            WCHAR moduleName[MAX_PATH];
-            if (GetModuleFileNameExW(hProcess, hMods[i], moduleName, sizeof(moduleName)/sizeof(WCHAR))) {
-                std::wstring name = moduleName;
-                size_t lastSlash = name.find_last_of(L"\\/");
-                if (lastSlash != std::wstring::npos) {
+            CHAR moduleName[MAX_PATH];
+            if (GetModuleFileNameExA(hProcess, hMods[i], moduleName, sizeof(moduleName))) {
+                std::string name = moduleName;
+                size_t lastSlash = name.find_last_of("\\/");
+                if (lastSlash != std::string::npos) {
                     name = name.substr(lastSlash + 1);
                 }
 
@@ -669,10 +667,8 @@ int main(int argc, char* argv[]) {
         std::cerr << "Failed to initialize injector." << std::endl;
         return 1;
     }
-
-    std::wstring dllPathW(dllPath.begin(), dllPath.end());
     
-    if (!injector.LaunchAndInject(gamePath, dllPathW, fieldOfView, targetFps, 
+    if (!injector.LaunchAndInject(gamePath, dllPath, fieldOfView, targetFps, 
                                  enableFov, enableFps, disableFog, fixLowFov, hideBanner, 
                                  removeTeamAnim, disableEventCamera, hideDamage, 
                                  touchScreen, redirectCombine)) {
