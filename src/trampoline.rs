@@ -110,7 +110,6 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         else if inst.is_rip_relative() {
             // Copy instruction to buffer and modify RIP-relative address
             unsafe {
-                // Use ptr::copy_nonoverlapping instead of loop
                 ptr::copy_nonoverlapping(
                     old_inst_addr as *const u8,
                     inst_buf.as_mut_ptr(),
@@ -118,10 +117,10 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
                 );
             }
 
-            // Relative address is stored at (instruction length - 4)
-            // This matches the original HDE logic for displacement calculation
-            let rel_addr_ptr =
-                unsafe { inst_buf.as_mut_ptr().add(inst.len as usize - 4) as *mut u32 };
+            // Relative address is stored at (instruction length - immediate value length - 4)
+            let imm_size = inst.immediate_size() as usize;
+            let rel_addr_offset = inst.len as usize - imm_size - 4;
+            let rel_addr_ptr = unsafe { inst_buf.as_mut_ptr().add(rel_addr_offset) as *mut u32 };
 
             let original_target = old_inst_addr + inst.len as usize + inst.displacement as usize;
             let new_relative =

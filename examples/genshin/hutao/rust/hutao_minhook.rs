@@ -540,37 +540,6 @@ fn install_min_hooks(base: u64, env: &IslandEnvironment) -> Result<()> {
 
         let mut originals = ORIGINALS.lock().unwrap();
 
-        // Create hooks
-        let target = (base + env.function_offsets.mickey_wonder_partner2 as u64) as *mut c_void;
-        let trampoline = create_hook(target, mickey_wonder_partner2_endpoint as *mut c_void)?;
-        originals.mickey_wonder_partner2 = Some(mem::transmute(trampoline));
-
-        let target = (base + env.function_offsets.set_field_of_view as u64) as *mut c_void;
-        let trampoline = create_hook(target, set_field_of_view_endpoint as *mut c_void)?;
-        originals.set_field_of_view = Some(mem::transmute(trampoline));
-
-        let target = (base + env.function_offsets.open_team as u64) as *mut c_void;
-        let trampoline = create_hook(target, open_team_endpoint as *mut c_void)?;
-        originals.open_team = Some(mem::transmute(trampoline));
-
-        let target = (base + env.function_offsets.setup_quest_banner as u64) as *mut c_void;
-        let trampoline = create_hook(target, setup_quest_banner_endpoint as *mut c_void)?;
-        originals.setup_quest_banner = Some(mem::transmute(trampoline));
-
-        let target = (base + env.function_offsets.event_camera_move as u64) as *mut c_void;
-        let trampoline = create_hook(target, event_camera_move_endpoint as *mut c_void)?;
-        originals.event_camera_move = Some(mem::transmute(trampoline));
-
-        let target = (base + env.function_offsets.show_one_damage_text_ex as u64) as *mut c_void;
-        let trampoline = create_hook(target, show_one_damage_text_ex_endpoint as *mut c_void)?;
-        originals.show_one_damage_text_ex = Some(mem::transmute(trampoline));
-
-        let target =
-            (base + env.function_offsets.mickey_wonder_combine_entry as u64) as *mut c_void;
-        let trampoline = create_hook(target, mickey_wonder_combine_entry_endpoint as *mut c_void)?;
-        originals.mickey_wonder_combine_entry = Some(mem::transmute(trampoline));
-
-        // Set direct function pointers
         originals.mickey_wonder = Some(mem::transmute(
             (base + env.function_offsets.mickey_wonder as u64) as *mut c_void,
         ));
@@ -601,6 +570,35 @@ fn install_min_hooks(base: u64, env: &IslandEnvironment) -> Result<()> {
         originals.mickey_wonder_combine_entry_partner = Some(mem::transmute(
             (base + env.function_offsets.mickey_wonder_combine_entry_partner as u64) as *mut c_void,
         ));
+
+        let target = (base + env.function_offsets.mickey_wonder_partner2 as u64) as *mut c_void;
+        let trampoline = create_hook(target, mickey_wonder_partner2_endpoint as *mut c_void)?;
+        originals.mickey_wonder_partner2 = Some(mem::transmute(trampoline));
+
+        let target = (base + env.function_offsets.set_field_of_view as u64) as *mut c_void;
+        let trampoline = create_hook(target, set_field_of_view_endpoint as *mut c_void)?;
+        originals.set_field_of_view = Some(mem::transmute(trampoline));
+
+        let target = (base + env.function_offsets.open_team as u64) as *mut c_void;
+        let trampoline = create_hook(target, open_team_endpoint as *mut c_void)?;
+        originals.open_team = Some(mem::transmute(trampoline));
+
+        let target = (base + env.function_offsets.setup_quest_banner as u64) as *mut c_void;
+        let trampoline = create_hook(target, setup_quest_banner_endpoint as *mut c_void)?;
+        originals.setup_quest_banner = Some(mem::transmute(trampoline));
+
+        let target = (base + env.function_offsets.event_camera_move as u64) as *mut c_void;
+        let trampoline = create_hook(target, event_camera_move_endpoint as *mut c_void)?;
+        originals.event_camera_move = Some(mem::transmute(trampoline));
+
+        let target = (base + env.function_offsets.show_one_damage_text_ex as u64) as *mut c_void;
+        let trampoline = create_hook(target, show_one_damage_text_ex_endpoint as *mut c_void)?;
+        originals.show_one_damage_text_ex = Some(mem::transmute(trampoline));
+
+        let target =
+            (base + env.function_offsets.mickey_wonder_combine_entry as u64) as *mut c_void;
+        let trampoline = create_hook(target, mickey_wonder_combine_entry_endpoint as *mut c_void)?;
+        originals.mickey_wonder_combine_entry = Some(mem::transmute(trampoline));
 
         // Enable all hooks
         enable_hook(ALL_HOOKS)?;
