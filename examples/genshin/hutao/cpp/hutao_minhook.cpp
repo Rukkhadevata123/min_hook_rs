@@ -1,7 +1,5 @@
 #include <windows.h>
-#include <string>
 #include <cmath>
-#include <mutex>
 #include "MinHook.h"
 
 #pragma comment(lib, "kernel32.lib")
@@ -78,9 +76,7 @@ struct FunctionOffsets {
 struct IslandEnvironment {
     enum IslandState State;
     DWORD LastError;
-    
     FunctionOffsets FunctionOffsets;
-    
     BOOL EnableSetFieldOfView;
     FLOAT FieldOfView;
     BOOL FixLowFovScene;
@@ -116,12 +112,12 @@ struct OriginalFunctions {
     MickeyWonderCombineEntryMethodPartner MickeyWonderCombineEntryPartner;
 };
 
-// Global variables
-const wchar_t* ISLAND_ENVIRONMENT_NAME = L"4F3E8543-40F7-4808-82DC-21E48A6037A7";
-IslandEnvironment* pEnvironment = nullptr;
-OriginalFunctions originals = {};
-std::string minnie;
-std::once_flag ofTouchScreen;
+const char* ISLAND_ENVIRONMENT_NAME = "4F3E8543-40F7-4808-82DC-21E48A6037A7";
+IslandEnvironment* pEnvironment = NULL;
+OriginalFunctions originals = {0};
+char minnie_buffer[1024] = {0};
+int minnie_length = 0;
+BOOL touch_screen_initialized = FALSE;
 
 // Memory protection disabling
 EXTERN_C NTSYSAPI NTSTATUS NTAPI LdrAddRefDll(ULONG Flags, PVOID DllHandle);
@@ -146,14 +142,14 @@ bool IsValidReadPtr(LPVOID ptr, SIZE_T size) {
     if (VirtualQuery(ptr, &mbi, sizeof(mbi))) {
         return (mbi.Protect & (PAGE_READWRITE | PAGE_READONLY)) != 0;
     }
-    return false;
+    return FALSE;
 }
 
 // Hook endpoints
 VOID MickeyWonderPartner2Endpoint(LPVOID mickey, LPVOID house, LPVOID spell) {
     BOOL bFound = FALSE;
     
-    Il2CppString* pString = originals.MickeyWonderPartner(minnie.c_str());
+    Il2CppString* pString = originals.MickeyWonderPartner(minnie_buffer);
     Il2CppString** ppCurrent = NULL;
     
     for (int offset = 0x10; offset < 0x233; offset += 0x8) {
@@ -182,16 +178,10 @@ VOID MickeyWonderPartner2Endpoint(LPVOID mickey, LPVOID house, LPVOID spell) {
 }
 
 VOID SetFieldOfViewEndpoint(LPVOID pThis, FLOAT value) {
-    std::call_once(ofTouchScreen, [&]() {
-        if (pEnvironment->UsingTouchScreen) {
-            __try {
-                originals.SwitchInputDeviceToTouchScreen(NULL);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER) {
-                // Ignore exception
-            }
-        }
-    });
+    if (!touch_screen_initialized && pEnvironment->UsingTouchScreen) {
+        touch_screen_initialized = TRUE;
+        originals.SwitchInputDeviceToTouchScreen(NULL);
+    }
     
     if (pEnvironment->EnableSetTargetFrameRate) {
         originals.SetTargetFrameRate(pEnvironment->TargetFrameRate);
@@ -201,8 +191,8 @@ VOID SetFieldOfViewEndpoint(LPVOID pThis, FLOAT value) {
         return originals.SetFieldOfView(pThis, value);
     }
     
-    if (std::floor(value) <= 30.0f) {
-        originals.SetEnableFogRendering(false);
+    if ((float)floor(value) <= 30.0f) {
+        originals.SetEnableFogRendering(FALSE);
         originals.SetFieldOfView(pThis, pEnvironment->FixLowFovScene ? value : pEnvironment->FieldOfView);
     } else {
         originals.SetEnableFogRendering(!pEnvironment->DisableFog);
@@ -212,7 +202,7 @@ VOID SetFieldOfViewEndpoint(LPVOID pThis, FLOAT value) {
 
 VOID OpenTeamEndpoint() {
     if (pEnvironment->RemoveOpenTeamProgress && originals.CheckCanEnter()) {
-        originals.OpenTeamPageAccordingly(false);
+        originals.OpenTeamPageAccordingly(FALSE);
     } else {
         originals.OpenTeam();
     }
@@ -225,14 +215,14 @@ VOID SetupQuestBannerEndpoint(LPVOID pThis) {
         Il2CppString* bannerString = originals.MickeyWonderPartner("Canvas/Pages/InLevelMapPage/GrpMap/GrpPointTips/Layout/QuestBanner");
         LPVOID banner = originals.FindGameObject(bannerString);
         if (banner) {
-            originals.SetActive(banner, false);
+            originals.SetActive(banner, FALSE);
         }
     }
 }
 
 bool EventCameraMoveEndpoint(LPVOID pThis, LPVOID event) {
     if (pEnvironment->DisableEventCameraMove) {
-        return true;
+        return TRUE;
     } else {
         return originals.EventCameraMove(pThis, event);
     }
@@ -255,78 +245,70 @@ VOID MickeyWonderCombineEntryEndpoint(LPVOID pThis) {
     originals.MickeyWonderCombineEntry(pThis);
 }
 
-bool InstallMinHooks(UINT64 base, IslandEnvironment* pEnvironment) {
+bool InstallMinHooks(UINT64 base, IslandEnvironment* env) {
     if (MH_Initialize() != MH_OK) {
-        return false;
+        return FALSE;
     }
 
     LPVOID pTarget;
     MH_STATUS status;
 
-    // MickeyWonderPartner2
-    pTarget = (LPVOID)(base + pEnvironment->FunctionOffsets.MickeyWonderPartner2);
+    pTarget = (LPVOID)(base + env->FunctionOffsets.MickeyWonderPartner2);
     status = MH_CreateHook(pTarget, MickeyWonderPartner2Endpoint, (LPVOID*)&originals.MickeyWonderPartner2);
-    if (status != MH_OK) return false;
+    if (status != MH_OK) return FALSE;
 
-    // SetFieldOfView
-    pTarget = (LPVOID)(base + pEnvironment->FunctionOffsets.SetFieldOfView);
+    pTarget = (LPVOID)(base + env->FunctionOffsets.SetFieldOfView);
     status = MH_CreateHook(pTarget, SetFieldOfViewEndpoint, (LPVOID*)&originals.SetFieldOfView);
-    if (status != MH_OK) return false;
+    if (status != MH_OK) return FALSE;
 
-    // OpenTeam
-    pTarget = (LPVOID)(base + pEnvironment->FunctionOffsets.OpenTeam);
+    pTarget = (LPVOID)(base + env->FunctionOffsets.OpenTeam);
     status = MH_CreateHook(pTarget, OpenTeamEndpoint, (LPVOID*)&originals.OpenTeam);
-    if (status != MH_OK) return false;
+    if (status != MH_OK) return FALSE;
 
-    // SetupQuestBanner
-    pTarget = (LPVOID)(base + pEnvironment->FunctionOffsets.SetupQuestBanner);
+    pTarget = (LPVOID)(base + env->FunctionOffsets.SetupQuestBanner);
     status = MH_CreateHook(pTarget, SetupQuestBannerEndpoint, (LPVOID*)&originals.SetupQuestBanner);
-    if (status != MH_OK) return false;
+    if (status != MH_OK) return FALSE;
 
-    // EventCameraMove
-    pTarget = (LPVOID)(base + pEnvironment->FunctionOffsets.EventCameraMove);
+    pTarget = (LPVOID)(base + env->FunctionOffsets.EventCameraMove);
     status = MH_CreateHook(pTarget, EventCameraMoveEndpoint, (LPVOID*)&originals.EventCameraMove);
-    if (status != MH_OK) return false;
+    if (status != MH_OK) return FALSE;
 
-    // ShowOneDamageTextEx
-    pTarget = (LPVOID)(base + pEnvironment->FunctionOffsets.ShowOneDamageTextEx);
+    pTarget = (LPVOID)(base + env->FunctionOffsets.ShowOneDamageTextEx);
     status = MH_CreateHook(pTarget, ShowOneDamageTextExEndpoint, (LPVOID*)&originals.ShowOneDamageTextEx);
-    if (status != MH_OK) return false;
+    if (status != MH_OK) return FALSE;
 
-    // MickeyWonderCombineEntry
-    pTarget = (LPVOID)(base + pEnvironment->FunctionOffsets.MickeyWonderCombineEntry);
+    pTarget = (LPVOID)(base + env->FunctionOffsets.MickeyWonderCombineEntry);
     status = MH_CreateHook(pTarget, MickeyWonderCombineEntryEndpoint, (LPVOID*)&originals.MickeyWonderCombineEntry);
-    if (status != MH_OK) return false;
+    if (status != MH_OK) return FALSE;
 
-    originals.MickeyWonder = reinterpret_cast<MickeyWonderMethod>(base + pEnvironment->FunctionOffsets.MickeyWonder);
-    originals.MickeyWonderPartner = reinterpret_cast<MickeyWonderMethodPartner>(base + pEnvironment->FunctionOffsets.MickeyWonderPartner);
-    originals.SetEnableFogRendering = reinterpret_cast<SetEnableFogRenderingMethod>(base + pEnvironment->FunctionOffsets.SetEnableFogRendering);
-    originals.SetTargetFrameRate = reinterpret_cast<SetTargetFrameRateMethod>(base + pEnvironment->FunctionOffsets.SetTargetFrameRate);
-    originals.OpenTeamPageAccordingly = reinterpret_cast<OpenTeamPageAccordinglyMethod>(base + pEnvironment->FunctionOffsets.OpenTeamPageAccordingly);
-    originals.CheckCanEnter = reinterpret_cast<CheckCanEnterMethod>(base + pEnvironment->FunctionOffsets.CheckCanEnter);
-    originals.FindGameObject = reinterpret_cast<FindGameObjectMethod>(base + pEnvironment->FunctionOffsets.FindGameObject);
-    originals.SetActive = reinterpret_cast<SetActiveMethod>(base + pEnvironment->FunctionOffsets.SetActive);
-    originals.SwitchInputDeviceToTouchScreen = reinterpret_cast<SwitchInputDeviceToTouchScreenMethod>(base + pEnvironment->FunctionOffsets.SwitchInputDeviceToTouchScreen);
-    originals.MickeyWonderCombineEntryPartner = reinterpret_cast<MickeyWonderCombineEntryMethodPartner>(base + pEnvironment->FunctionOffsets.MickeyWonderCombineEntryPartner);
+    originals.MickeyWonder = (MickeyWonderMethod)(base + env->FunctionOffsets.MickeyWonder);
+    originals.MickeyWonderPartner = (MickeyWonderMethodPartner)(base + env->FunctionOffsets.MickeyWonderPartner);
+    originals.SetEnableFogRendering = (SetEnableFogRenderingMethod)(base + env->FunctionOffsets.SetEnableFogRendering);
+    originals.SetTargetFrameRate = (SetTargetFrameRateMethod)(base + env->FunctionOffsets.SetTargetFrameRate);
+    originals.OpenTeamPageAccordingly = (OpenTeamPageAccordinglyMethod)(base + env->FunctionOffsets.OpenTeamPageAccordingly);
+    originals.CheckCanEnter = (CheckCanEnterMethod)(base + env->FunctionOffsets.CheckCanEnter);
+    originals.FindGameObject = (FindGameObjectMethod)(base + env->FunctionOffsets.FindGameObject);
+    originals.SetActive = (SetActiveMethod)(base + env->FunctionOffsets.SetActive);
+    originals.SwitchInputDeviceToTouchScreen = (SwitchInputDeviceToTouchScreenMethod)(base + env->FunctionOffsets.SwitchInputDeviceToTouchScreen);
+    originals.MickeyWonderCombineEntryPartner = (MickeyWonderCombineEntryMethodPartner)(base + env->FunctionOffsets.MickeyWonderCombineEntryPartner);
 
     status = MH_EnableHook(MH_ALL_HOOKS);
     if (status != MH_OK) {
         MH_Uninitialize();
-        return false;
+        return FALSE;
     }
 
-    return true;
+    return TRUE;
 }
 
-// Static hook procedure for exports
+// Static hook procedure
 static LRESULT WINAPI IslandGetWindowHookImpl(int code, WPARAM wParam, LPARAM lParam) {
     return CallNextHookEx(NULL, code, wParam, lParam);
 }
 
 // Main DLL thread
 DWORD WINAPI IslandThread(LPVOID lpParam) {
-    // Open shared memory
-    HANDLE hFile = OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, ISLAND_ENVIRONMENT_NAME);
+    HANDLE hFile = OpenFileMappingA(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, ISLAND_ENVIRONMENT_NAME);
     if (!hFile) {
         return GetLastError();
     }
@@ -337,32 +319,27 @@ DWORD WINAPI IslandThread(LPVOID lpParam) {
         return GetLastError();
     }
     
-    pEnvironment = static_cast<IslandEnvironment*>(lpView);
+    pEnvironment = (IslandEnvironment*)lpView;
     pEnvironment->State = Started;
     
-    // Initialize base address
-    UINT64 base = (UINT64)GetModuleHandleW(NULL);
+    UINT64 base = (UINT64)GetModuleHandleA(NULL);
     
-    // Build minnie string
+    minnie_length = 0;
     for (INT32 n = 0; n < 3; n++) {
-        MickeyWonderMethod mickeyWonder = reinterpret_cast<MickeyWonderMethod>(base + pEnvironment->FunctionOffsets.MickeyWonder);
+        MickeyWonderMethod mickeyWonder = (MickeyWonderMethod)(base + pEnvironment->FunctionOffsets.MickeyWonder);
+        
         __try {
-            Il2CppArraySize* const result = mickeyWonder(n);
-            if (result) {
-                minnie += std::string(reinterpret_cast<char*>(&result->vector[0]), result->max_length);
+            Il2CppArraySize* result = mickeyWonder(n);
+            if (result && minnie_length + result->max_length < sizeof(minnie_buffer)) {
+                memcpy(minnie_buffer + minnie_length, &result->vector[0], result->max_length);
+                minnie_length += (int)result->max_length;
             }
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {
-            // Failed to call MickeyWonder, set error state
-            pEnvironment->State = Error;
-            pEnvironment->LastError = GetExceptionCode();
-            UnmapViewOfFile(lpView);
-            CloseHandle(hFile);
-            return GetExceptionCode();
+            // Handle exceptions
         }
     }
     
-    // Install hooks using MinHook
     if (!InstallMinHooks(base, pEnvironment)) {
         pEnvironment->State = Error;
         pEnvironment->LastError = GetLastError();
@@ -371,10 +348,8 @@ DWORD WINAPI IslandThread(LPVOID lpParam) {
         return GetLastError();
     }
     
-    // Wait indefinitely
     WaitForSingleObject(GetCurrentThread(), INFINITE);
     
-    // Cleanup
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
     
@@ -382,7 +357,7 @@ DWORD WINAPI IslandThread(LPVOID lpParam) {
     UnmapViewOfFile(lpView);
     CloseHandle(hFile);
     
-    FreeLibraryAndExitThread(static_cast<HMODULE>(lpParam), 0);
+    FreeLibraryAndExitThread((HMODULE)lpParam, 0);
     return 0;
 }
 
@@ -409,18 +384,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     switch (ul_reason_for_call) {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hModule);
-        
-        // Pin DLL in memory
         LdrAddRefDll(LDR_ADDREF_DLL_PIN, hModule);
-        
-        // Disable memory protection
         DisableProtectVirtualMemory();
-        
-        // Create main thread
         CreateThread(NULL, 0, IslandThread, hModule, 0, NULL);
         break;
     case DLL_PROCESS_DETACH:
-        // Cleanup MinHook
         MH_DisableHook(MH_ALL_HOOKS);
         MH_Uninitialize();
         Sleep(500);
