@@ -38,6 +38,7 @@ features = [
     "Win32_System_Kernel",
     "Win32_System_ProcessStatus",
     "Win32_System_SystemInformation",
+    "Win32_System_IO",
     "Win32_System_SystemServices",
     "Win32_System_Diagnostics_Debug",
     "Win32_System_Diagnostics_ToolHelp",
@@ -84,8 +85,12 @@ path = "examples/notepad/notepad_injector.rs"
 # Genshin Examples
 
 [[example]]
-name = "hutao_injector"
-path = "examples/genshin/hutao/hutao_injector.rs"
+name = "hutao_launcher"
+path = "examples/genshin/hutao/hutao_launcher.rs"
+
+[[example]]
+name = "hutao_config"
+path = "examples/genshin/hutao/hutao_config.rs"
 
 [[example]]
 name = "hutao_dll"
