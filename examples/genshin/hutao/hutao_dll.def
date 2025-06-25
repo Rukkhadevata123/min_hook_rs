@@ -1,0 +1,4 @@
+EXPORTS
+DllGetWindowsHookForHutao
+IslandGetWindowHook
+IslandGetFunctionOffsetsSize
