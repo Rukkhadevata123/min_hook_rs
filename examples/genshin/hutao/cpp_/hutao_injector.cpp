@@ -4,9 +4,6 @@
 #include <sstream>
 #include <tlhelp32.h>
 #include <psapi.h>
-#include <thread>
-#include <atomic>
-#include <chrono>
 
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "advapi32.lib")
@@ -88,13 +85,10 @@ private:
     LPVOID pSharedMemory;
     HANDLE hProcess;
     DWORD processId;
-    std::atomic<bool> gameRunning;
-    std::thread monitorThread;
-    std::atomic<bool> shouldQuit;
 
 public:
     HutaoInjector() : hMemoryMappedFile(nullptr), pSharedMemory(nullptr), 
-                     hProcess(nullptr), processId(0), gameRunning(false), shouldQuit(false) {}
+                     hProcess(nullptr), processId(0) {}
 
     ~HutaoInjector() {
         Cleanup();
@@ -106,12 +100,12 @@ public:
 
     bool LaunchAndInject(const std::string& gamePath, const std::wstring& dllPath,
                         float fov, int fps, bool enableFov, bool enableFps,
-                        bool disableFog, bool hideBanner, bool removeTeamAnim,
+                        bool disableFog, bool fixLowFov, bool hideBanner, bool removeTeamAnim,
                         bool disableEventCamera, bool hideDamage, bool touchScreen, bool redirectCombine) {
         
         // Configure initial environment
         ConfigureInitialEnvironment(fov, fps, enableFov, enableFps,
-                                  disableFog, hideBanner, removeTeamAnim,
+                                  disableFog, fixLowFov, hideBanner, removeTeamAnim,
                                   disableEventCamera, hideDamage, touchScreen, redirectCombine);
 
         // Launch game
@@ -124,21 +118,17 @@ public:
             return false;
         }
 
-        // Start monitoring thread
-        gameRunning = true;
-        shouldQuit = false;
-        monitorThread = std::thread(&HutaoInjector::MonitorGameProcess, this);
-
         return true;
     }
 
     void RunConfigLoop() {
         std::cout << "\n=== Hutao Injector & Configuration Tool ===" << std::endl;
         std::cout << "Type 'help' for commands, 'status' for current config, or 'quit' to exit." << std::endl;
-        std::cout << "Monitoring game process (PID: " << processId << ")..." << std::endl;
+        std::cout << "Game launched with PID: " << processId << std::endl;
+        std::cout << "\n[NOTE] Remember to use 'quit' command to restore defaults before closing!" << std::endl;
 
         std::string input;
-        while (!shouldQuit) {
+        while (true) {
             std::cout << "hutao> ";
             if (!std::getline(std::cin, input)) {
                 break;  // EOF or input stream closed
@@ -147,23 +137,11 @@ public:
             if (!input.empty()) {
                 if (input == "quit" || input == "exit") {
                     std::cout << "Restoring defaults and preparing to exit..." << std::endl;
-                    
-                    // Use unified reset method
                     ProcessCommand("reset");
-                    
-                    // Set to stopped state and execute cleanup
-                    if (pSharedMemory) {
-                        static_cast<IslandEnvironment*>(pSharedMemory)->State = IslandState::Stopped;
-                    }
-                    
-                    std::cout << "Configuration restored to defaults." << std::endl;
                     break;
                 }
                 ProcessCommand(input);
             }
-            
-            // Check game status after each command
-            CheckGameStatus();
         }
 
         std::cout << "\nExiting configuration loop..." << std::endl;
@@ -208,7 +186,7 @@ private:
     }
 
     void ConfigureInitialEnvironment(float fov, int fps, bool enableFov, bool enableFps,
-                                   bool disableFog, bool hideBanner, bool removeTeamAnim,
+                                   bool disableFog, bool fixLowFov, bool hideBanner, bool removeTeamAnim,
                                    bool disableEventCamera, bool hideDamage, bool touchScreen, bool redirectCombine) {
         if (!pSharedMemory) return;
 
@@ -218,7 +196,7 @@ private:
         pEnv->FunctionOffsets = ChineseOffsets;
         pEnv->EnableSetFieldOfView = enableFov ? TRUE : FALSE;
         pEnv->FieldOfView = fov;
-        pEnv->FixLowFovScene = FALSE;
+        pEnv->FixLowFovScene = fixLowFov ? TRUE : FALSE;
         pEnv->DisableFog = disableFog ? TRUE : FALSE;
         pEnv->EnableSetTargetFrameRate = enableFps ? TRUE : FALSE;
         pEnv->TargetFrameRate = fps;
@@ -233,6 +211,7 @@ private:
         std::cout << "\n[OK] Initial configuration applied:" << std::endl;
         std::cout << "  - FPS: " << fps << (enableFps ? " (enabled)" : " (disabled)") << std::endl;
         std::cout << "  - FOV: " << fov << (enableFov ? " (enabled)" : " (disabled)") << std::endl;
+        std::cout << "  - Fix low FOV scenes: " << (fixLowFov ? "enabled" : "disabled") << std::endl;
         std::cout << "  - Other settings configured" << std::endl;
     }
 
@@ -329,63 +308,6 @@ private:
         return true;
     }
 
-    // Simplified monitoring thread, only responsible for setting gameRunning status
-    void MonitorGameProcess() {
-        while (gameRunning && !shouldQuit) {
-            DWORD exitCode;
-            if (!GetExitCodeProcess(hProcess, &exitCode) || exitCode != STILL_ACTIVE) {
-                gameRunning = false;
-                shouldQuit = true;
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // Lower check frequency
-        }
-    }
-
-    // Unified game status check function
-    void CheckGameStatus() {
-        if (!hProcess) return;
-        
-        DWORD exitCode;
-        if (!GetExitCodeProcess(hProcess, &exitCode) || exitCode != STILL_ACTIVE) {
-            if (gameRunning.exchange(false)) { // Only execute when first detecting exit
-                std::cout << "\n[INFO] Game process has exited! Executing automatic quit..." << std::endl;
-                
-                // Apply defaults through unified reset method
-                if (pSharedMemory) {
-                    ApplyDefaults(static_cast<IslandEnvironment*>(pSharedMemory));
-                    std::cout << "[INFO] Game settings restored to defaults." << std::endl;
-                }
-                
-                // Set quit flag to exit main loop
-                shouldQuit = true;
-            }
-        }
-    }
-
-    // Unified default value application function
-    void ApplyDefaults(IslandEnvironment* pEnv) {
-        if (!pEnv) return;
-        
-        // Directly set default values, do not use recursive calls
-        pEnv->TargetFrameRate = 60;
-        pEnv->EnableSetTargetFrameRate = TRUE;
-        pEnv->FieldOfView = 45.0f;
-        pEnv->EnableSetFieldOfView = TRUE;
-        pEnv->DisableFog = FALSE;
-        pEnv->HideQuestBanner = FALSE;
-        pEnv->RemoveOpenTeamProgress = FALSE;
-        pEnv->DisableEventCameraMove = FALSE;
-        pEnv->DisableShowDamageText = FALSE;
-        pEnv->UsingTouchScreen = FALSE;
-        pEnv->RedirectCombineEntry = FALSE;
-        
-        // Maintain running state unless explicitly requested to stop
-        if (pEnv->State != IslandState::Stopped) {
-            pEnv->State = IslandState::Started;
-        }
-    }
-
     void ProcessCommand(const std::string& command) {
         if (!pSharedMemory) return;
 
@@ -397,21 +319,38 @@ private:
         if (cmd == "fps") {
             int value;
             if (iss >> value) {
+                if (value < 30) {
+                    std::cout << "Error: FPS must be at least 30. Current value: " << value << std::endl;
+                    return;
+                }
                 pEnv->TargetFrameRate = value;
                 pEnv->EnableSetTargetFrameRate = TRUE;
                 std::cout << "FPS set to: " << value << " (enabled)" << std::endl;
             } else {
-                std::cout << "Usage: fps <value> - Set target frame rate (e.g., fps 120)" << std::endl;
+                std::cout << "Usage: fps <value> - Set target frame rate (minimum 30, e.g., fps 120)" << std::endl;
             }
         }
         else if (cmd == "fov") {
             float value;
             if (iss >> value) {
+                if (value < 1.0f) {
+                    std::cout << "Error: FOV must be at least 1.0. Current value: " << value << std::endl;
+                    return;
+                }
                 pEnv->FieldOfView = value;
                 pEnv->EnableSetFieldOfView = TRUE;
                 std::cout << "FOV set to: " << value << " (enabled)" << std::endl;
             } else {
-                std::cout << "Usage: fov <value> - Set field of view (e.g., fov 60.0)" << std::endl;
+                std::cout << "Usage: fov <value> - Set field of view (minimum 1.0, e.g., fov 60.0)" << std::endl;
+            }
+        }
+        else if (cmd == "fixfov") {
+            std::string state;
+            if (iss >> state) {
+                pEnv->FixLowFovScene = (state == "on" || state == "enable") ? TRUE : FALSE;
+                std::cout << "Fix low FOV scenes: " << (pEnv->FixLowFovScene ? "enabled" : "disabled") << std::endl;
+            } else {
+                std::cout << "Usage: fixfov <on|off> - Fix low FOV scenes (fov <= 30)" << std::endl;
             }
         }
         else if (cmd == "fog") {
@@ -459,15 +398,6 @@ private:
                 std::cout << "Usage: damage <show|hide>" << std::endl;
             }
         }
-        else if (cmd == "touch") {
-            std::string state;
-            if (iss >> state) {
-                pEnv->UsingTouchScreen = (state == "on") ? TRUE : FALSE;
-                std::cout << "Touch screen: " << (pEnv->UsingTouchScreen ? "enabled" : "disabled") << std::endl;
-            } else {
-                std::cout << "Usage: touch <on|off>" << std::endl;
-            }
-        }
         else if (cmd == "craft") {
             std::string state;
             if (iss >> state) {
@@ -482,7 +412,19 @@ private:
         }
         else if (cmd == "reset") {
             std::cout << "Resetting all settings to default values..." << std::endl;
-            ApplyDefaults(pEnv);
+            // Restore default values
+            pEnv->TargetFrameRate = 60;
+            pEnv->EnableSetTargetFrameRate = TRUE;
+            pEnv->FieldOfView = 45.0f;
+            pEnv->EnableSetFieldOfView = TRUE;
+            pEnv->FixLowFovScene = FALSE;
+            pEnv->DisableFog = FALSE;
+            pEnv->HideQuestBanner = FALSE;
+            pEnv->RemoveOpenTeamProgress = FALSE;
+            pEnv->DisableEventCameraMove = FALSE;
+            pEnv->DisableShowDamageText = FALSE;
+            pEnv->UsingTouchScreen = FALSE;
+            pEnv->RedirectCombineEntry = FALSE;
             std::cout << "[OK] All settings have been reset to defaults" << std::endl;
         }
         else if (cmd == "help" || cmd == "?") {
@@ -497,6 +439,7 @@ private:
         std::cout << "\n=== Current Configuration ===" << std::endl;
         std::cout << "FPS: " << pEnv->TargetFrameRate << (pEnv->EnableSetTargetFrameRate ? " (enabled)" : " (disabled)") << std::endl;
         std::cout << "FOV: " << pEnv->FieldOfView << (pEnv->EnableSetFieldOfView ? " (enabled)" : " (disabled)") << std::endl;
+        std::cout << "Fix low FOV scenes: " << (pEnv->FixLowFovScene ? "enabled" : "disabled") << std::endl;
         std::cout << "Fog: " << (pEnv->DisableFog ? "disabled" : "enabled") << std::endl;
         std::cout << "Banner: " << (pEnv->HideQuestBanner ? "hidden" : "visible") << std::endl;
         std::cout << "Team animation: " << (pEnv->RemoveOpenTeamProgress ? "removed" : "normal") << std::endl;
@@ -505,46 +448,34 @@ private:
         std::cout << "Touch screen: " << (pEnv->UsingTouchScreen ? "enabled" : "disabled") << std::endl;
         std::cout << "Crafting table: " << (pEnv->RedirectCombineEntry ? "redirected to synthesis" : "normal") << std::endl;
         std::cout << "State: " << (int)pEnv->State << std::endl;
-        std::cout << "Game process: " << (gameRunning ? "Running" : "Exited") << std::endl;
+        std::cout << "Game PID: " << processId << std::endl;
     }
 
     void ShowHelp() {
         std::cout << "\n=== Available Commands ===" << std::endl;
         std::cout << "fps <value>          - Set target FPS (e.g., fps 120)" << std::endl;
         std::cout << "fov <value>          - Set field of view (e.g., fov 60.0)" << std::endl;
+        std::cout << "fixfov <on|off>      - Fix low FOV scenes (fov <= 30)" << std::endl;
         std::cout << "fog <on|off>         - Enable/disable fog rendering" << std::endl;
         std::cout << "banner <show|hide>   - Show/hide quest banner" << std::endl;
         std::cout << "team <normal|remove> - Control team opening animation" << std::endl;
         std::cout << "camera <enable|disable> - Control event camera movement" << std::endl;
         std::cout << "damage <show|hide>   - Control damage number display" << std::endl;
-        std::cout << "touch <on|off>       - Toggle touch screen mode" << std::endl;
         std::cout << "craft <normal|redirect> - Control crafting table redirect" << std::endl;
         std::cout << "status               - Show current configuration" << std::endl;
         std::cout << "reset                - Reset all settings to defaults" << std::endl;
         std::cout << "help, ?              - Show this help message" << std::endl;
         std::cout << "quit, exit           - Restore defaults and exit" << std::endl;
+        std::cout << "\n[IMPORTANT] Always use 'quit' to properly restore defaults!" << std::endl;
         std::cout << "===========================" << std::endl;
     }
 
     void Cleanup() {
         std::cout << "[Cleanup] Starting cleanup process..." << std::endl;
         
-        gameRunning = false;
-        shouldQuit = true;
-        
-        // Wait for monitor thread to finish
-        if (monitorThread.joinable()) {
-            std::cout << "[Cleanup] Waiting for monitor thread to finish..." << std::endl;
-            monitorThread.join();
-            std::cout << "[Cleanup] Monitor thread finished" << std::endl;
-        }
-        
         if (pSharedMemory) {
-            std::cout << "[Cleanup] Restoring defaults..." << std::endl;
+            std::cout << "[Cleanup] Setting DLL state to stopped..." << std::endl;
             IslandEnvironment* pEnv = static_cast<IslandEnvironment*>(pSharedMemory);
-            
-            // Use unified default value restoration method
-            ApplyDefaults(pEnv);
             pEnv->State = IslandState::Stopped;
             
             UnmapViewOfFile(pSharedMemory);
@@ -698,12 +629,27 @@ int main(int argc, char* argv[]) {
         dllPath = GetInput("DLL path", "hutao_minhook.dll");
     }
     
-    // Configuration setup
-    int targetFps = GetIntInput("Target FPS", 60);
-    float fieldOfView = GetFloatInput("Field of View", 45.0f);
+    // Configuration setup with validation
+    int targetFps;
+    do {
+        targetFps = GetIntInput("Target FPS (minimum 30)", 60);
+        if (targetFps < 30) {
+            std::cout << "Error: FPS must be at least 30. Please try again." << std::endl;
+        }
+    } while (targetFps < 30);
+    
+    float fieldOfView;
+    do {
+        fieldOfView = GetFloatInput("Field of View (minimum 1.0)", 45.0f);
+        if (fieldOfView < 1.0f) {
+            std::cout << "Error: FOV must be at least 1.0. Please try again." << std::endl;
+        }
+    } while (fieldOfView < 1.0f);
+    
     bool enableFps = targetFps > 0;
     bool enableFov = fieldOfView > 0;
     bool disableFog = GetBoolInput("Disable fog rendering?", false);
+    bool fixLowFov = GetBoolInput("Fix low FOV scenes (fov <= 30)?", false);
     bool hideBanner = GetBoolInput("Hide quest banner?", false);
     bool removeTeamAnim = GetBoolInput("Remove team open animation?", false);
     bool disableEventCamera = GetBoolInput("Disable event camera movement?", false);
@@ -727,7 +673,7 @@ int main(int argc, char* argv[]) {
     std::wstring dllPathW(dllPath.begin(), dllPath.end());
     
     if (!injector.LaunchAndInject(gamePath, dllPathW, fieldOfView, targetFps, 
-                                 enableFov, enableFps, disableFog, hideBanner, 
+                                 enableFov, enableFps, disableFog, fixLowFov, hideBanner, 
                                  removeTeamAnim, disableEventCamera, hideDamage, 
                                  touchScreen, redirectCombine)) {
         std::cerr << "Failed to launch and inject." << std::endl;
