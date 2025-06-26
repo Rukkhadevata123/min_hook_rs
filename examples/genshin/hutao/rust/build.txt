@@ -1,0 +1,7 @@
+cd C:\Users\Yoimiya\min_hook_rs\examples\genshin\hutao\rust
+cl /c /O2 /TC hutao_seh_stub.c
+lib /OUT:hutao_seh_stub.lib hutao_seh_stub.obj
+del hutao_seh_stub.obj
+
+set RUSTFLAGS=-Lnative=examples\genshin\hutao\rust
+cargo build --examples --release

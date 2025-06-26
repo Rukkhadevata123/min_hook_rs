@@ -1,4 +1,4 @@
-use microseh;
+mod hutao_seh;
 use min_hook_rs::*;
 use std::ffi::{CString, c_void};
 use std::mem;
@@ -302,8 +302,8 @@ unsafe extern "system" fn set_field_of_view_endpoint(p_this: *mut c_void, value:
         if !TOUCH_SCREEN_INITIALIZED && env.using_touch_screen != 0 {
             TOUCH_SCREEN_INITIALIZED = true;
             if let Some(touch_fn) = touch_fn {
-                // Use microseh to handle exceptions like C++ __try/__except
-                match microseh::try_seh(|| {
+                // Use hutao_seh to handle exceptions like C++ __try/__except
+                match hutao_seh::try_seh(|| {
                     touch_fn(ptr::null_mut());
                 }) {
                     Ok(_) => {
@@ -643,7 +643,7 @@ extern "system" fn island_thread(lp_param: *mut c_void) -> u32 {
 
         let base = GetModuleHandleA(ptr::null()) as u64;
 
-        // Build minnie string using microseh for exception handling
+        // Build minnie string using hutao_seh for exception handling
         MINNIE_LENGTH = 0;
 
         for n in 0..3 {
@@ -651,8 +651,8 @@ extern "system" fn island_thread(lp_param: *mut c_void) -> u32 {
             let mickey_wonder: MickeyWonderMethod =
                 mem::transmute(mickey_wonder_addr as *mut c_void);
 
-            // Use microseh to handle exceptions like C++ __try/__except
-            match microseh::try_seh(|| {
+            // Use hutao_seh to handle exceptions like C++ __try/__except
+            match hutao_seh::try_seh(|| {
                 let result = mickey_wonder(n);
                 if !result.is_null() {
                     let array = &*result;
