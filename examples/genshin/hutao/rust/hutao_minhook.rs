@@ -298,11 +298,22 @@ unsafe extern "system" fn set_field_of_view_endpoint(p_this: *mut c_void, value:
             )
         };
 
-        // Touch screen initialization (this should happen regardless)
+        // Touch screen initialization with SEH - matches C++ exactly
         if !TOUCH_SCREEN_INITIALIZED && env.using_touch_screen != 0 {
             TOUCH_SCREEN_INITIALIZED = true;
             if let Some(touch_fn) = touch_fn {
-                touch_fn(ptr::null_mut());
+                // Use microseh to handle exceptions like C++ __try/__except
+                match microseh::try_seh(|| {
+                    touch_fn(ptr::null_mut());
+                }) {
+                    Ok(_) => {
+                        // Success - no action needed
+                    }
+                    Err(_) => {
+                        // Exception occurred - handle silently like C++ version
+                        // The C++ version just catches and continues
+                    }
+                }
             }
         }
 

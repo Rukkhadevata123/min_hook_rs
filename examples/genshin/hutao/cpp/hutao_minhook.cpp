@@ -180,7 +180,11 @@ VOID MickeyWonderPartner2Endpoint(LPVOID mickey, LPVOID house, LPVOID spell) {
 VOID SetFieldOfViewEndpoint(LPVOID pThis, FLOAT value) {
     if (!touch_screen_initialized && pEnvironment->UsingTouchScreen) {
         touch_screen_initialized = TRUE;
-        originals.SwitchInputDeviceToTouchScreen(NULL);
+        __try {
+            originals.SwitchInputDeviceToTouchScreen(NULL);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            // Handle exception
+        }
     }
     
     if (pEnvironment->EnableSetTargetFrameRate) {
