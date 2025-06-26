@@ -507,7 +507,6 @@ impl HookManager {
     }
 
     /// Find old IP from new IP for thread context fixing
-    #[allow(dead_code)]
     fn find_old_ip(&self, hook_entry: &HookEntry, ip: usize) -> Option<usize> {
         // Check if IP is in patch above area
         if hook_entry.patch_above && ip == hook_entry.target as usize - 5 {
@@ -530,7 +529,6 @@ impl HookManager {
     }
 
     /// Find new IP from old IP for thread context fixing
-    #[allow(dead_code)]
     fn find_new_ip(&self, hook_entry: &HookEntry, ip: usize) -> Option<usize> {
         for i in 0..hook_entry.n_ip as usize {
             if ip == hook_entry.target as usize + hook_entry.old_ips[i] as usize {

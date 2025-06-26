@@ -39,7 +39,6 @@ struct FunctionOffsets {
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum IslandState {
-    #[allow(dead_code)]
     None = 0,
     Error = 1,
     Started = 2,
@@ -208,7 +207,7 @@ impl HutaoInjector {
             let mut sa = SECURITY_ATTRIBUTES {
                 nLength: mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
                 lpSecurityDescriptor: ptr::null_mut(),
-                bInheritHandle: TRUE.into(),
+                bInheritHandle: TRUE,
             };
 
             let name = CString::new(self.shared_memory_name).unwrap();
@@ -329,7 +328,7 @@ impl HutaoInjector {
                 ptr::null_mut(),
                 ptr::null_mut(),
                 ptr::null_mut(),
-                FALSE.into(),
+                FALSE,
                 0,
                 ptr::null_mut(),
                 game_dir_c.as_ptr() as *const u8,
@@ -743,11 +742,11 @@ impl HutaoInjector {
 
             let module_count = cb_needed as usize / mem::size_of::<HMODULE>();
 
-            for i in 0..module_count.min(h_mods.len()) {
+            for &h_mod in h_mods.iter().take(module_count.min(h_mods.len())) {
                 let mut module_name = [0u8; 260]; // MAX_PATH
                 if GetModuleFileNameExA(
                     self.h_process,
-                    h_mods[i],
+                    h_mod,
                     module_name.as_mut_ptr(),
                     module_name.len() as u32,
                 ) != 0
@@ -755,7 +754,7 @@ impl HutaoInjector {
                     let name_str = String::from_utf8_lossy(&module_name);
                     let name_str = name_str.trim_end_matches('\0');
 
-                    if let Some(filename) = name_str.split('\\').last() {
+                    if let Some(filename) = name_str.split('\\').next_back() {
                         if filename == exe_name {
                             return true;
                         }
@@ -789,7 +788,7 @@ impl HutaoInjector {
                 loop {
                     if te32.th32OwnerProcessID == process_id {
                         let h_thread =
-                            OpenThread(THREAD_QUERY_INFORMATION, FALSE.into(), te32.th32ThreadID);
+                            OpenThread(THREAD_QUERY_INFORMATION, FALSE, te32.th32ThreadID);
                         if !h_thread.is_null() {
                             let mut creation_time = mem::zeroed();
                             let mut exit_time = mem::zeroed();

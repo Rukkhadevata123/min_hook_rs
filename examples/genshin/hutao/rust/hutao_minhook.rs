@@ -376,16 +376,14 @@ unsafe extern "system" fn open_team_endpoint() {
 
         // CORRECTED: Exact C++ logic translation
         let should_use_page_fn =
-            env.remove_open_team_progress != 0 && check_fn.map_or(false, |f| f());
+            env.remove_open_team_progress != 0 && check_fn.is_some_and(|f| f());
 
         if should_use_page_fn {
             if let Some(page_fn) = page_fn {
                 page_fn(false);
             }
-        } else {
-            if let Some(team_fn) = team_fn {
-                team_fn();
-            }
+        } else if let Some(team_fn) = team_fn {
+            team_fn();
         }
     }
 }
@@ -412,20 +410,17 @@ unsafe extern "system" fn setup_quest_banner_endpoint(p_this: *mut c_void) {
             if let Some(banner_fn) = banner_fn {
                 banner_fn(p_this);
             }
-        } else {
-            if let Some(partner_fn) = partner_fn {
-                let banner_path = CString::new(
-                    "Canvas/Pages/InLevelMapPage/GrpMap/GrpPointTips/Layout/QuestBanner",
-                )
-                .unwrap();
-                let banner_string = partner_fn(banner_path.as_ptr());
+        } else if let Some(partner_fn) = partner_fn {
+            let banner_path =
+                CString::new("Canvas/Pages/InLevelMapPage/GrpMap/GrpPointTips/Layout/QuestBanner")
+                    .unwrap();
+            let banner_string = partner_fn(banner_path.as_ptr());
 
-                if let Some(find_fn) = find_fn {
-                    let banner = find_fn(banner_string);
-                    if !banner.is_null() {
-                        if let Some(active_fn) = active_fn {
-                            active_fn(banner, false);
-                        }
+            if let Some(find_fn) = find_fn {
+                let banner = find_fn(banner_string);
+                if !banner.is_null() {
+                    if let Some(active_fn) = active_fn {
+                        active_fn(banner, false);
                     }
                 }
             }
@@ -551,65 +546,91 @@ fn install_min_hooks(base: u64, env: &IslandEnvironment) -> Result<()> {
 
         let mut originals = ORIGINALS.lock().unwrap();
 
-        originals.mickey_wonder = Some(mem::transmute(
+        // Fix transmute annotations
+        originals.mickey_wonder = Some(mem::transmute::<*mut c_void, MickeyWonderMethod>(
             (base + env.function_offsets.mickey_wonder as u64) as *mut c_void,
         ));
-        originals.mickey_wonder_partner = Some(mem::transmute(
-            (base + env.function_offsets.mickey_wonder_partner as u64) as *mut c_void,
-        ));
-        originals.set_enable_fog_rendering = Some(mem::transmute(
-            (base + env.function_offsets.set_enable_fog_rendering as u64) as *mut c_void,
-        ));
-        originals.set_target_frame_rate = Some(mem::transmute(
-            (base + env.function_offsets.set_target_frame_rate as u64) as *mut c_void,
-        ));
-        originals.open_team_page_accordingly = Some(mem::transmute(
+        originals.mickey_wonder_partner =
+            Some(mem::transmute::<*mut c_void, MickeyWonderMethodPartner>(
+                (base + env.function_offsets.mickey_wonder_partner as u64) as *mut c_void,
+            ));
+        originals.set_enable_fog_rendering =
+            Some(mem::transmute::<*mut c_void, SetEnableFogRenderingMethod>(
+                (base + env.function_offsets.set_enable_fog_rendering as u64) as *mut c_void,
+            ));
+        originals.set_target_frame_rate =
+            Some(mem::transmute::<*mut c_void, SetTargetFrameRateMethod>(
+                (base + env.function_offsets.set_target_frame_rate as u64) as *mut c_void,
+            ));
+        originals.open_team_page_accordingly = Some(mem::transmute::<
+            *mut c_void,
+            OpenTeamPageAccordinglyMethod,
+        >(
             (base + env.function_offsets.open_team_page_accordingly as u64) as *mut c_void,
         ));
-        originals.check_can_enter = Some(mem::transmute(
+        originals.check_can_enter = Some(mem::transmute::<*mut c_void, CheckCanEnterMethod>(
             (base + env.function_offsets.check_can_enter as u64) as *mut c_void,
         ));
-        originals.find_game_object = Some(mem::transmute(
+        originals.find_game_object = Some(mem::transmute::<*mut c_void, FindGameObjectMethod>(
             (base + env.function_offsets.find_game_object as u64) as *mut c_void,
         ));
-        originals.set_active = Some(mem::transmute(
+        originals.set_active = Some(mem::transmute::<*mut c_void, SetActiveMethod>(
             (base + env.function_offsets.set_active as u64) as *mut c_void,
         ));
-        originals.switch_input_device_to_touch_screen = Some(mem::transmute(
+        originals.switch_input_device_to_touch_screen = Some(mem::transmute::<
+            *mut c_void,
+            SwitchInputDeviceToTouchScreenMethod,
+        >(
             (base + env.function_offsets.switch_input_device_to_touch_screen as u64) as *mut c_void,
         ));
-        originals.mickey_wonder_combine_entry_partner = Some(mem::transmute(
+        originals.mickey_wonder_combine_entry_partner = Some(mem::transmute::<
+            *mut c_void,
+            MickeyWonderCombineEntryMethodPartner,
+        >(
             (base + env.function_offsets.mickey_wonder_combine_entry_partner as u64) as *mut c_void,
         ));
 
         let target = (base + env.function_offsets.mickey_wonder_partner2 as u64) as *mut c_void;
         let trampoline = create_hook(target, mickey_wonder_partner2_endpoint as *mut c_void)?;
-        originals.mickey_wonder_partner2 = Some(mem::transmute(trampoline));
+        originals.mickey_wonder_partner2 = Some(mem::transmute::<
+            *mut c_void,
+            MickeyWonderMethodPartner2,
+        >(trampoline));
 
         let target = (base + env.function_offsets.set_field_of_view as u64) as *mut c_void;
         let trampoline = create_hook(target, set_field_of_view_endpoint as *mut c_void)?;
-        originals.set_field_of_view = Some(mem::transmute(trampoline));
+        originals.set_field_of_view = Some(mem::transmute::<*mut c_void, SetFieldOfViewMethod>(
+            trampoline,
+        ));
 
         let target = (base + env.function_offsets.open_team as u64) as *mut c_void;
         let trampoline = create_hook(target, open_team_endpoint as *mut c_void)?;
-        originals.open_team = Some(mem::transmute(trampoline));
+        originals.open_team = Some(mem::transmute::<*mut c_void, OpenTeamMethod>(trampoline));
 
         let target = (base + env.function_offsets.setup_quest_banner as u64) as *mut c_void;
         let trampoline = create_hook(target, setup_quest_banner_endpoint as *mut c_void)?;
-        originals.setup_quest_banner = Some(mem::transmute(trampoline));
+        originals.setup_quest_banner = Some(mem::transmute::<*mut c_void, SetupQuestBannerMethod>(
+            trampoline,
+        ));
 
         let target = (base + env.function_offsets.event_camera_move as u64) as *mut c_void;
         let trampoline = create_hook(target, event_camera_move_endpoint as *mut c_void)?;
-        originals.event_camera_move = Some(mem::transmute(trampoline));
+        originals.event_camera_move = Some(mem::transmute::<*mut c_void, EventCameraMoveMethod>(
+            trampoline,
+        ));
 
         let target = (base + env.function_offsets.show_one_damage_text_ex as u64) as *mut c_void;
         let trampoline = create_hook(target, show_one_damage_text_ex_endpoint as *mut c_void)?;
-        originals.show_one_damage_text_ex = Some(mem::transmute(trampoline));
+        originals.show_one_damage_text_ex = Some(mem::transmute::<
+            *mut c_void,
+            ShowOneDamageTextExMethod,
+        >(trampoline));
 
         let target =
             (base + env.function_offsets.mickey_wonder_combine_entry as u64) as *mut c_void;
         let trampoline = create_hook(target, mickey_wonder_combine_entry_endpoint as *mut c_void)?;
-        originals.mickey_wonder_combine_entry = Some(mem::transmute(trampoline));
+        originals.mickey_wonder_combine_entry =
+            Some(mem::transmute::<*mut c_void, MickeyWonderCombineEntryMethod>(trampoline));
 
         // Enable all hooks
         enable_hook(ALL_HOOKS)?;
@@ -625,7 +646,7 @@ extern "system" fn island_thread(lp_param: *mut c_void) -> u32 {
 
         let h_file = OpenFileMappingA(
             FILE_MAP_READ | FILE_MAP_WRITE,
-            FALSE.into(),
+            FALSE,
             env_name_c.as_ptr() as *const u8,
         );
         if h_file.is_null() || h_file == INVALID_HANDLE_VALUE {
@@ -679,7 +700,7 @@ extern "system" fn island_thread(lp_param: *mut c_void) -> u32 {
         }
 
         // Install hooks
-        if let Err(_) = install_min_hooks(base, &(*P_ENVIRONMENT)) {
+        if install_min_hooks(base, &(*P_ENVIRONMENT)).is_err() {
             (*P_ENVIRONMENT).state = IslandState::Error;
             (*P_ENVIRONMENT).last_error = GetLastError();
             UnmapViewOfFile(lp_view);
@@ -713,7 +734,7 @@ extern "system" fn island_get_window_hook_impl(
 
 // Export functions - Updated following upstream changes
 #[unsafe(no_mangle)]
-pub extern "system" fn DllGetWindowsHookForHutao(p_hook_proc: *mut *mut c_void) -> HRESULT {
+pub unsafe extern "system" fn DllGetWindowsHookForHutao(p_hook_proc: *mut *mut c_void) -> HRESULT {
     // We don't handle package family checks - keep it simple
     unsafe {
         *p_hook_proc = island_get_window_hook_impl as *mut c_void;
@@ -722,7 +743,7 @@ pub extern "system" fn DllGetWindowsHookForHutao(p_hook_proc: *mut *mut c_void) 
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn IslandGetFunctionOffsetsSize(p_count: *mut u64) -> HRESULT {
+pub unsafe extern "system" fn IslandGetFunctionOffsetsSize(p_count: *mut u64) -> HRESULT {
     unsafe {
         *p_count = mem::size_of::<FunctionOffsets>() as u64;
         0 // S_OK
@@ -731,7 +752,7 @@ pub extern "system" fn IslandGetFunctionOffsetsSize(p_count: *mut u64) -> HRESUL
 
 // DLL entry point
 #[unsafe(no_mangle)]
-pub extern "system" fn DllMain(
+pub unsafe extern "system" fn DllMain(
     h_module: HINSTANCE,
     ul_reason_for_call: u32,
     _lp_reserved: *mut c_void,
@@ -740,13 +761,13 @@ pub extern "system" fn DllMain(
         match ul_reason_for_call {
             DLL_PROCESS_ATTACH => {
                 DisableThreadLibraryCalls(h_module);
-                LdrAddRefDll(LDR_ADDREF_DLL_PIN, h_module as *mut c_void);
+                LdrAddRefDll(LDR_ADDREF_DLL_PIN, h_module);
                 disable_protect_virtual_memory();
                 CreateThread(
                     ptr::null_mut(),
                     0,
                     Some(island_thread),
-                    h_module as *mut c_void,
+                    h_module,
                     0,
                     ptr::null_mut(),
                 );
@@ -758,6 +779,6 @@ pub extern "system" fn DllMain(
             }
             _ => {}
         }
-        TRUE.into()
+        TRUE
     }
 }

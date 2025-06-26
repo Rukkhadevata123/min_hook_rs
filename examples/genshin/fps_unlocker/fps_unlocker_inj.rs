@@ -34,10 +34,8 @@ struct IpcData {
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
 enum IpcStatus {
     Error = -1,
-    #[allow(dead_code)]
     None = 0,
     HostAwaiting = 1,
     ClientReady = 2,
