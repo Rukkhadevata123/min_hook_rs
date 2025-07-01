@@ -442,7 +442,7 @@ DWORD WINAPI IslandThread(LPVOID lpParam) {
             if (hLogFile != INVALID_HANDLE_VALUE) {
                 SetFilePointer(hLogFile, 0, NULL, FILE_END);
                 
-                char debugBuffer[4096];  // 增大缓冲区
+                char debugBuffer[512];
                 SYSTEMTIME st;
                 GetLocalTime(&st);
                 
@@ -450,9 +450,6 @@ DWORD WINAPI IslandThread(LPVOID lpParam) {
                                        (exInfo.info0 == 1) ? "write" : 
                                        (exInfo.info0 == 8) ? "execute" : "unknown";
                 
-                UINT64 target_addr = base + pEnvironment->FunctionOffsets.MickeyWonder;
-                
-                // 基本异常信息
                 int len = wsprintfA(debugBuffer, 
                     "[%04d-%02d-%02d %02d:%02d:%02d] MickeyWonder[%d] ACCESS_VIOLATION:\r\n"
                     "  Base: %p\r\n"
@@ -464,121 +461,10 @@ DWORD WINAPI IslandThread(LPVOID lpParam) {
                     (void*)base,
                     pEnvironment->FunctionOffsets.MickeyWonder,
                     pEnvironment->FunctionOffsets.MickeyWonder,
-                    (void*)target_addr,
+                    (void*)(base + pEnvironment->FunctionOffsets.MickeyWonder),
                     exInfo.address,
                     operation,
                     (LPVOID)exInfo.info1);
-                
-                // 内存区域分析
-                MEMORY_BASIC_INFORMATION mbi;
-                if (VirtualQuery((LPVOID)target_addr, &mbi, sizeof(mbi))) {
-                    len += wsprintfA(debugBuffer + len,
-                        "Memory Analysis:\r\n"
-                        "  BaseAddress: %p\r\n"
-                        "  AllocationBase: %p\r\n"
-                        "  AllocationProtect: 0x%08X\r\n"
-                        "  RegionSize: %llu bytes\r\n"
-                        "  State: 0x%08X (%s)\r\n"
-                        "  Protect: 0x%08X (%s)\r\n"
-                        "  Type: 0x%08X\r\n\r\n",
-                        mbi.BaseAddress,
-                        mbi.AllocationBase,
-                        mbi.AllocationProtect,
-                        (unsigned long long)mbi.RegionSize,
-                        mbi.State,
-                        (mbi.State == MEM_COMMIT) ? "COMMIT" : 
-                        (mbi.State == MEM_FREE) ? "FREE" : 
-                        (mbi.State == MEM_RESERVE) ? "RESERVE" : "UNKNOWN",
-                        mbi.Protect,
-                        (mbi.Protect & PAGE_EXECUTE) ? "EXECUTABLE" :
-                        (mbi.Protect & PAGE_READWRITE) ? "READWRITE" :
-                        (mbi.Protect & PAGE_READONLY) ? "READONLY" :
-                        (mbi.Protect & PAGE_NOACCESS) ? "NOACCESS" : "OTHER");
-                }
-                
-                // 尝试读取目标地址附近的字节码（安全读取）
-                len += wsprintfA(debugBuffer + len, "Bytecode Analysis:\r\n");
-                
-                // 检查目标地址前后各64字节的内容
-                for (int offset = -64; offset <= 128; offset += 16) {
-                    UINT64 check_addr = target_addr + offset;
-                    MEMORY_BASIC_INFORMATION check_mbi;
-                    
-                    if (VirtualQuery((LPVOID)check_addr, &check_mbi, sizeof(check_mbi)) &&
-                        check_mbi.State == MEM_COMMIT &&
-                        (check_mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) {
-                        
-                        len += wsprintfA(debugBuffer + len, "  %p: ", (void*)check_addr);
-                        
-                        // 尝试读取16字节
-                        __try {
-                            BYTE* ptr = (BYTE*)check_addr;
-                            for (int i = 0; i < 16; i++) {
-                                len += wsprintfA(debugBuffer + len, "%02X ", ptr[i]);
-                            }
-                            len += wsprintfA(debugBuffer + len, " | ");
-                            
-                            // 打印可打印字符
-                            for (int i = 0; i < 16; i++) {
-                                char c = (char)ptr[i];
-                                if (c >= 32 && c <= 126) {
-                                    len += wsprintfA(debugBuffer + len, "%c", c);
-                                } else {
-                                    len += wsprintfA(debugBuffer + len, ".");
-                                }
-                            }
-                            
-                            if (offset == 0) {
-                                len += wsprintfA(debugBuffer + len, " <- TARGET");
-                            }
-                            
-                        } __except(EXCEPTION_EXECUTE_HANDLER) {
-                            len += wsprintfA(debugBuffer + len, "[READ_ERROR]");
-                        }
-                        
-                        len += wsprintfA(debugBuffer + len, "\r\n");
-                    } else {
-                        len += wsprintfA(debugBuffer + len, "  %p: [INVALID_MEMORY]\r\n", (void*)check_addr);
-                    }
-                }
-                
-                // 模块信息分析
-                len += wsprintfA(debugBuffer + len, "\r\nModule Analysis:\r\n");
-                
-                // 获取进程中的模块信息
-                HMODULE hMods[1024];
-                DWORD cbNeeded;
-                HANDLE hProcess = GetCurrentProcess();
-                
-                if (EnumProcessModules(hProcess, hMods, sizeof(hMods), &cbNeeded)) {
-                    DWORD moduleCount = cbNeeded / sizeof(HMODULE);
-                    
-                    for (DWORD i = 0; i < moduleCount && i < 1024; i++) {
-                        MODULEINFO modInfo;
-                        if (GetModuleInformation(hProcess, hMods[i], &modInfo, sizeof(modInfo))) {
-                            UINT64 modStart = (UINT64)modInfo.lpBaseOfDll;
-                            UINT64 modEnd = modStart + modInfo.SizeOfImage;
-                            
-                            if (target_addr >= modStart && target_addr < modEnd) {
-                                char modName[MAX_PATH];
-                                if (GetModuleFileNameExA(hProcess, hMods[i], modName, sizeof(modName))) {
-                                    len += wsprintfA(debugBuffer + len,
-                                        "  TARGET IN MODULE: %s\r\n"
-                                        "    Base: %p, Size: %u bytes\r\n"
-                                        "    Offset in module: 0x%08X\r\n",
-                                        modName,
-                                        modInfo.lpBaseOfDll,
-                                        modInfo.SizeOfImage,
-                                        (UINT32)(target_addr - modStart));
-                                }
-                                break;
-                            }
-                        }
-                    }
-                }
-                
-                len += wsprintfA(debugBuffer + len, 
-                    "\r\n================================================\r\n\r\n");
                 
                 DWORD written;
                 WriteFile(hLogFile, debugBuffer, len, &written, NULL);
