@@ -17,9 +17,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct FunctionOffsets {
-    mickey_wonder: u32,
-    mickey_wonder_partner: u32,
-    mickey_wonder_partner2: u32,
+    find_string: u32,
     set_field_of_view: u32,
     set_enable_fog_rendering: u32,
     set_target_frame_rate: u32,
@@ -32,8 +30,8 @@ struct FunctionOffsets {
     event_camera_move: u32,
     show_one_damage_text_ex: u32,
     switch_input_device_to_touch_screen: u32,
-    mickey_wonder_combine_entry: u32,
-    mickey_wonder_combine_entry_partner: u32,
+    craft_entry: u32,
+    craft_entry_partner: u32,
 }
 
 #[repr(i32)]
@@ -51,18 +49,16 @@ struct IslandEnvironment {
     state: IslandState,
     last_error: u32,
     function_offsets: FunctionOffsets,
-    enable_set_field_of_view: i32, // BOOL
     field_of_view: f32,
-    fix_low_fov_scene: i32,            // BOOL
-    disable_fog: i32,                  // BOOL
-    enable_set_target_frame_rate: i32, // BOOL
+    fix_low_fov_scene: i32, // BOOL
+    disable_fog: i32,       // BOOL
     target_frame_rate: i32,
     remove_open_team_progress: i32, // BOOL
     hide_quest_banner: i32,         // BOOL
     disable_event_camera_move: i32, // BOOL
     disable_show_damage_text: i32,  // BOOL
     using_touch_screen: i32,        // BOOL
-    redirect_combine_entry: i32,    // BOOL
+    redirect_craft_entry: i32,      // BOOL
 }
 
 // Configuration structure for initial settings
@@ -70,8 +66,6 @@ struct IslandEnvironment {
 struct GameConfig {
     fov: f32,
     fps: i32,
-    enable_fov: bool,
-    enable_fps: bool,
     disable_fog: bool,
     fix_low_fov: bool,
     hide_banner: bool,
@@ -79,7 +73,7 @@ struct GameConfig {
     disable_event_camera: bool,
     hide_damage: bool,
     touch_screen: bool,
-    redirect_combine: bool,
+    redirect_craft: bool,
 }
 
 impl Default for GameConfig {
@@ -87,16 +81,14 @@ impl Default for GameConfig {
         Self {
             fov: 45.0,
             fps: 60,
-            enable_fov: true,
-            enable_fps: true,
             disable_fog: false,
-            fix_low_fov: false,
+            fix_low_fov: true,
             hide_banner: false,
             remove_team_anim: false,
             disable_event_camera: false,
             hide_damage: false,
             touch_screen: false,
-            redirect_combine: false,
+            redirect_craft: false,
         }
     }
 }
@@ -115,9 +107,7 @@ impl HutaoInjector {
 
     // Chinese version offsets
     const CHINESE_OFFSETS: FunctionOffsets = FunctionOffsets {
-        mickey_wonder: 87242192,
-        mickey_wonder_partner: 4830752,
-        mickey_wonder_partner2: 215314944,
+        find_string: 4830752,
         set_field_of_view: 17204528,
         set_enable_fog_rendering: 277807600,
         set_target_frame_rate: 277729120,
@@ -130,8 +120,8 @@ impl HutaoInjector {
         event_camera_move: 186643424,
         show_one_damage_text_ex: 204578400,
         switch_input_device_to_touch_screen: 144617776,
-        mickey_wonder_combine_entry: 127845632,
-        mickey_wonder_combine_entry_partner: 201143472,
+        craft_entry: 127845632,
+        craft_entry_partner: 201143472,
     };
 
     fn new() -> Self {
@@ -254,40 +244,22 @@ impl HutaoInjector {
             ptr::write_bytes(p_env, 0, 1); // ZeroMemory equivalent
 
             (*p_env).function_offsets = self.chinese_offsets;
-            (*p_env).enable_set_field_of_view = if config.enable_fov { 1 } else { 0 };
             (*p_env).field_of_view = config.fov;
             (*p_env).fix_low_fov_scene = if config.fix_low_fov { 1 } else { 0 };
             (*p_env).disable_fog = if config.disable_fog { 1 } else { 0 };
-            (*p_env).enable_set_target_frame_rate = if config.enable_fps { 1 } else { 0 };
             (*p_env).target_frame_rate = config.fps;
             (*p_env).remove_open_team_progress = if config.remove_team_anim { 1 } else { 0 };
             (*p_env).hide_quest_banner = if config.hide_banner { 1 } else { 0 };
             (*p_env).disable_event_camera_move = if config.disable_event_camera { 1 } else { 0 };
             (*p_env).disable_show_damage_text = if config.hide_damage { 1 } else { 0 };
             (*p_env).using_touch_screen = if config.touch_screen { 1 } else { 0 };
-            (*p_env).redirect_combine_entry = if config.redirect_combine { 1 } else { 0 };
+            (*p_env).redirect_craft_entry = if config.redirect_craft { 1 } else { 0 };
             (*p_env).state = IslandState::Started;
         }
 
         println!("\n[OK] Initial configuration applied:");
-        println!(
-            "  - FPS: {} {}",
-            config.fps,
-            if config.enable_fps {
-                "(enabled)"
-            } else {
-                "(disabled)"
-            }
-        );
-        println!(
-            "  - FOV: {} {}",
-            config.fov,
-            if config.enable_fov {
-                "(enabled)"
-            } else {
-                "(disabled)"
-            }
-        );
+        println!("  - FPS: {} (always enabled)", config.fps);
+        println!("  - FOV: {} (always enabled)", config.fov);
         println!(
             "  - Fix low FOV scenes: {}",
             if config.fix_low_fov {
@@ -448,7 +420,6 @@ impl HutaoInjector {
                                 return;
                             }
                             (*p_env).target_frame_rate = value;
-                            (*p_env).enable_set_target_frame_rate = 1;
                             println!("FPS set to: {} (enabled)", value);
                         } else {
                             println!("Invalid FPS value");
@@ -470,7 +441,6 @@ impl HutaoInjector {
                                 return;
                             }
                             (*p_env).field_of_view = value;
-                            (*p_env).enable_set_field_of_view = 1;
                             println!("FOV set to: {} (enabled)", value);
                         } else {
                             println!("Invalid FOV value");
@@ -556,14 +526,10 @@ impl HutaoInjector {
                 "craft" => {
                     if parts.len() > 1 {
                         let redirected = parts[1] == "redirect";
-                        (*p_env).redirect_combine_entry = if redirected { 1 } else { 0 };
+                        (*p_env).redirect_craft_entry = if redirected { 1 } else { 0 };
                         println!(
                             "Crafting table: {}",
-                            if redirected {
-                                "redirected to synthesis"
-                            } else {
-                                "normal"
-                            }
+                            if redirected { "redirected" } else { "normal" }
                         );
                     } else {
                         println!("Usage: craft <normal|redirect>");
@@ -576,17 +542,15 @@ impl HutaoInjector {
                     println!("Resetting all settings to default values...");
                     // Restore default values
                     (*p_env).target_frame_rate = 60;
-                    (*p_env).enable_set_target_frame_rate = 1;
                     (*p_env).field_of_view = 45.0;
-                    (*p_env).enable_set_field_of_view = 1;
-                    (*p_env).fix_low_fov_scene = 0;
+                    (*p_env).fix_low_fov_scene = 1;
                     (*p_env).disable_fog = 0;
                     (*p_env).hide_quest_banner = 0;
                     (*p_env).remove_open_team_progress = 0;
                     (*p_env).disable_event_camera_move = 0;
                     (*p_env).disable_show_damage_text = 0;
                     (*p_env).using_touch_screen = 0;
-                    (*p_env).redirect_combine_entry = 0;
+                    (*p_env).redirect_craft_entry = 0;
                     println!("[OK] All settings have been reset to defaults");
                 }
                 "help" | "?" => {
@@ -605,24 +569,8 @@ impl HutaoInjector {
     fn show_status(&self, p_env: *const IslandEnvironment) {
         unsafe {
             println!("\n=== Current Configuration ===");
-            println!(
-                "FPS: {} {}",
-                (*p_env).target_frame_rate,
-                if (*p_env).enable_set_target_frame_rate != 0 {
-                    "(enabled)"
-                } else {
-                    "(disabled)"
-                }
-            );
-            println!(
-                "FOV: {} {}",
-                (*p_env).field_of_view,
-                if (*p_env).enable_set_field_of_view != 0 {
-                    "(enabled)"
-                } else {
-                    "(disabled)"
-                }
-            );
+            println!("FPS: {} (always enabled)", (*p_env).target_frame_rate);
+            println!("FOV: {} (always enabled)", (*p_env).field_of_view);
             println!(
                 "Fix low FOV scenes: {}",
                 if (*p_env).fix_low_fov_scene != 0 {
@@ -681,8 +629,8 @@ impl HutaoInjector {
             );
             println!(
                 "Crafting table: {}",
-                if (*p_env).redirect_combine_entry != 0 {
-                    "redirected to synthesis"
+                if (*p_env).redirect_craft_entry != 0 {
+                    "redirected"
                 } else {
                     "normal"
                 }
@@ -949,16 +897,14 @@ fn main() {
     let config = GameConfig {
         fov: field_of_view,
         fps: target_fps,
-        enable_fov: field_of_view > 0.0,
-        enable_fps: target_fps > 0,
         disable_fog: get_bool_input("Disable fog rendering?", false),
-        fix_low_fov: get_bool_input("Fix low FOV scenes (fov <= 30)?", false),
+        fix_low_fov: get_bool_input("Fix low FOV scenes (fov <= 30)?", true),
         hide_banner: get_bool_input("Hide quest banner?", false),
         remove_team_anim: get_bool_input("Remove team open animation?", false),
         disable_event_camera: get_bool_input("Disable event camera movement?", false),
         hide_damage: get_bool_input("Hide damage numbers?", false),
         touch_screen: get_bool_input("Enable touch screen mode?", false),
-        redirect_combine: get_bool_input("Redirect crafting table to synthesis station?", false),
+        redirect_craft: get_bool_input("Redirect crafting table?", false),
     };
 
     // Check if DLL exists

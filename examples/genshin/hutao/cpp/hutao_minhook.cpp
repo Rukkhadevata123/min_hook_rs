@@ -1,10 +1,12 @@
 #include <windows.h>
 #include <cmath>
+#include <psapi.h>
 #include "MinHook.h"
 
 #pragma comment(lib, "kernel32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "ntdll.lib")
+#pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "MinHook.x64.lib")
 
 // IL2CPP structures
@@ -136,6 +138,85 @@ VOID DisableProtectVirtualMemory() {
     VirtualProtect(pNtProtectVirtualMemory, 1, old, &old);
 }
 
+struct ExceptionInfo {
+    DWORD code;
+    LPVOID address;
+    ULONG_PTR info0;
+    ULONG_PTR info1;
+};
+
+// 修改 LogException 函数以支持更详细的信息
+void LogException(const char* location, const ExceptionInfo* exInfo) {
+    HANDLE hFile = CreateFileA("hutao_exceptions.log", 
+        GENERIC_WRITE, FILE_SHARE_READ, NULL, 
+        OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    
+    if (hFile != INVALID_HANDLE_VALUE) {
+        SetFilePointer(hFile, 0, NULL, FILE_END);
+        
+        char buffer[1024];
+        const char* exceptionName = "UNKNOWN";
+        
+        switch (exInfo->code) {
+            case EXCEPTION_ACCESS_VIOLATION:
+                exceptionName = "ACCESS_VIOLATION";
+                break;
+            case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+                exceptionName = "ARRAY_BOUNDS_EXCEEDED";
+                break;
+            case EXCEPTION_DATATYPE_MISALIGNMENT:
+                exceptionName = "DATATYPE_MISALIGNMENT";
+                break;
+            case EXCEPTION_FLT_DENORMAL_OPERAND:
+                exceptionName = "FLT_DENORMAL_OPERAND";
+                break;
+            case EXCEPTION_FLT_DIVIDE_BY_ZERO:
+                exceptionName = "FLT_DIVIDE_BY_ZERO";
+                break;
+            case EXCEPTION_ILLEGAL_INSTRUCTION:
+                exceptionName = "ILLEGAL_INSTRUCTION";
+                break;
+            case EXCEPTION_IN_PAGE_ERROR:
+                exceptionName = "IN_PAGE_ERROR";
+                break;
+            case EXCEPTION_INT_DIVIDE_BY_ZERO:
+                exceptionName = "INT_DIVIDE_BY_ZERO";
+                break;
+            case EXCEPTION_INVALID_DISPOSITION:
+                exceptionName = "INVALID_DISPOSITION";
+                break;
+            case EXCEPTION_STACK_OVERFLOW:
+                exceptionName = "STACK_OVERFLOW";
+                break;
+        }
+        
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        
+        int len;
+        if (exInfo->code == EXCEPTION_ACCESS_VIOLATION) {
+            const char* operation = (exInfo->info0 == 0) ? "READ" : 
+                                   (exInfo->info0 == 1) ? "write" : 
+                                   (exInfo->info0 == 8) ? "execute" : "unknown";
+            len = wsprintfA(buffer, 
+                "[%04d-%02d-%02d %02d:%02d:%02d] %s: %s (0x%08X) at 0x%p - %s access to 0x%p\r\n",
+                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+                location, exceptionName, exInfo->code, exInfo->address, 
+                operation, (LPVOID)exInfo->info1);
+        } else {
+            len = wsprintfA(buffer, 
+                "[%04d-%02d-%02d %02d:%02d:%02d] %s: %s (0x%08X) at 0x%p - info[0]=0x%p, info[1]=0x%p\r\n",
+                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+                location, exceptionName, exInfo->code, exInfo->address,
+                (LPVOID)exInfo->info0, (LPVOID)exInfo->info1);
+        }
+        
+        DWORD written;
+        WriteFile(hFile, buffer, len, &written, NULL);
+        CloseHandle(hFile);
+    }
+}
+
 // Utility functions
 bool IsValidReadPtr(LPVOID ptr, SIZE_T size) {
     MEMORY_BASIC_INFORMATION mbi;
@@ -180,10 +261,18 @@ VOID MickeyWonderPartner2Endpoint(LPVOID mickey, LPVOID house, LPVOID spell) {
 VOID SetFieldOfViewEndpoint(LPVOID pThis, FLOAT value) {
     if (!touch_screen_initialized && pEnvironment->UsingTouchScreen) {
         touch_screen_initialized = TRUE;
+        ExceptionInfo exInfo = {0};
+        
         __try {
             originals.SwitchInputDeviceToTouchScreen(NULL);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            // Handle exception
+        } __except (exInfo.code = GetExceptionCode(),
+                   exInfo.address = GetExceptionInformation()->ExceptionRecord->ExceptionAddress,
+                   exInfo.info0 = GetExceptionInformation()->ExceptionRecord->NumberParameters > 0 ? 
+                                 GetExceptionInformation()->ExceptionRecord->ExceptionInformation[0] : 0,
+                   exInfo.info1 = GetExceptionInformation()->ExceptionRecord->NumberParameters > 1 ? 
+                                 GetExceptionInformation()->ExceptionRecord->ExceptionInformation[1] : 0,
+                   EXCEPTION_EXECUTE_HANDLER) {
+            LogException("SetFieldOfViewEndpoint::SwitchInputDeviceToTouchScreen", &exInfo);
         }
     }
     
@@ -331,16 +420,170 @@ DWORD WINAPI IslandThread(LPVOID lpParam) {
     minnie_length = 0;
     for (INT32 n = 0; n < 3; n++) {
         MickeyWonderMethod mickeyWonder = (MickeyWonderMethod)(base + pEnvironment->FunctionOffsets.MickeyWonder);
-        
+        ExceptionInfo exInfo = {0};
         __try {
             Il2CppArraySize* result = mickeyWonder(n);
             if (result && minnie_length + result->max_length < sizeof(minnie_buffer)) {
                 memcpy(minnie_buffer + minnie_length, &result->vector[0], result->max_length);
                 minnie_length += (int)result->max_length;
             }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            // Handle exceptions
+        } __except (exInfo.code = GetExceptionCode(),
+                   exInfo.address = GetExceptionInformation()->ExceptionRecord->ExceptionAddress,
+                   exInfo.info0 = GetExceptionInformation()->ExceptionRecord->NumberParameters > 0 ? 
+                                 GetExceptionInformation()->ExceptionRecord->ExceptionInformation[0] : 0,
+                   exInfo.info1 = GetExceptionInformation()->ExceptionRecord->NumberParameters > 1 ? 
+                                 GetExceptionInformation()->ExceptionRecord->ExceptionInformation[1] : 0,
+                   EXCEPTION_EXECUTE_HANDLER) {
+            
+            HANDLE hLogFile = CreateFileA("hutao_exceptions.log", 
+                GENERIC_WRITE, FILE_SHARE_READ, NULL, 
+                OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            
+            if (hLogFile != INVALID_HANDLE_VALUE) {
+                SetFilePointer(hLogFile, 0, NULL, FILE_END);
+                
+                char debugBuffer[4096];  // 增大缓冲区
+                SYSTEMTIME st;
+                GetLocalTime(&st);
+                
+                const char* operation = (exInfo.info0 == 0) ? "read" : 
+                                       (exInfo.info0 == 1) ? "write" : 
+                                       (exInfo.info0 == 8) ? "execute" : "unknown";
+                
+                UINT64 target_addr = base + pEnvironment->FunctionOffsets.MickeyWonder;
+                
+                // 基本异常信息
+                int len = wsprintfA(debugBuffer, 
+                    "[%04d-%02d-%02d %02d:%02d:%02d] MickeyWonder[%d] ACCESS_VIOLATION:\r\n"
+                    "  Base: %p\r\n"
+                    "  Offset: %u (0x%08X)\r\n"
+                    "  Calculated: %p\r\n"
+                    "  Exception at: %p - %s access to %p\r\n\r\n",
+                    st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+                    n,
+                    (void*)base,
+                    pEnvironment->FunctionOffsets.MickeyWonder,
+                    pEnvironment->FunctionOffsets.MickeyWonder,
+                    (void*)target_addr,
+                    exInfo.address,
+                    operation,
+                    (LPVOID)exInfo.info1);
+                
+                // 内存区域分析
+                MEMORY_BASIC_INFORMATION mbi;
+                if (VirtualQuery((LPVOID)target_addr, &mbi, sizeof(mbi))) {
+                    len += wsprintfA(debugBuffer + len,
+                        "Memory Analysis:\r\n"
+                        "  BaseAddress: %p\r\n"
+                        "  AllocationBase: %p\r\n"
+                        "  AllocationProtect: 0x%08X\r\n"
+                        "  RegionSize: %llu bytes\r\n"
+                        "  State: 0x%08X (%s)\r\n"
+                        "  Protect: 0x%08X (%s)\r\n"
+                        "  Type: 0x%08X\r\n\r\n",
+                        mbi.BaseAddress,
+                        mbi.AllocationBase,
+                        mbi.AllocationProtect,
+                        (unsigned long long)mbi.RegionSize,
+                        mbi.State,
+                        (mbi.State == MEM_COMMIT) ? "COMMIT" : 
+                        (mbi.State == MEM_FREE) ? "FREE" : 
+                        (mbi.State == MEM_RESERVE) ? "RESERVE" : "UNKNOWN",
+                        mbi.Protect,
+                        (mbi.Protect & PAGE_EXECUTE) ? "EXECUTABLE" :
+                        (mbi.Protect & PAGE_READWRITE) ? "READWRITE" :
+                        (mbi.Protect & PAGE_READONLY) ? "READONLY" :
+                        (mbi.Protect & PAGE_NOACCESS) ? "NOACCESS" : "OTHER");
+                }
+                
+                // 尝试读取目标地址附近的字节码（安全读取）
+                len += wsprintfA(debugBuffer + len, "Bytecode Analysis:\r\n");
+                
+                // 检查目标地址前后各64字节的内容
+                for (int offset = -64; offset <= 128; offset += 16) {
+                    UINT64 check_addr = target_addr + offset;
+                    MEMORY_BASIC_INFORMATION check_mbi;
+                    
+                    if (VirtualQuery((LPVOID)check_addr, &check_mbi, sizeof(check_mbi)) &&
+                        check_mbi.State == MEM_COMMIT &&
+                        (check_mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) {
+                        
+                        len += wsprintfA(debugBuffer + len, "  %p: ", (void*)check_addr);
+                        
+                        // 尝试读取16字节
+                        __try {
+                            BYTE* ptr = (BYTE*)check_addr;
+                            for (int i = 0; i < 16; i++) {
+                                len += wsprintfA(debugBuffer + len, "%02X ", ptr[i]);
+                            }
+                            len += wsprintfA(debugBuffer + len, " | ");
+                            
+                            // 打印可打印字符
+                            for (int i = 0; i < 16; i++) {
+                                char c = (char)ptr[i];
+                                if (c >= 32 && c <= 126) {
+                                    len += wsprintfA(debugBuffer + len, "%c", c);
+                                } else {
+                                    len += wsprintfA(debugBuffer + len, ".");
+                                }
+                            }
+                            
+                            if (offset == 0) {
+                                len += wsprintfA(debugBuffer + len, " <- TARGET");
+                            }
+                            
+                        } __except(EXCEPTION_EXECUTE_HANDLER) {
+                            len += wsprintfA(debugBuffer + len, "[READ_ERROR]");
+                        }
+                        
+                        len += wsprintfA(debugBuffer + len, "\r\n");
+                    } else {
+                        len += wsprintfA(debugBuffer + len, "  %p: [INVALID_MEMORY]\r\n", (void*)check_addr);
+                    }
+                }
+                
+                // 模块信息分析
+                len += wsprintfA(debugBuffer + len, "\r\nModule Analysis:\r\n");
+                
+                // 获取进程中的模块信息
+                HMODULE hMods[1024];
+                DWORD cbNeeded;
+                HANDLE hProcess = GetCurrentProcess();
+                
+                if (EnumProcessModules(hProcess, hMods, sizeof(hMods), &cbNeeded)) {
+                    DWORD moduleCount = cbNeeded / sizeof(HMODULE);
+                    
+                    for (DWORD i = 0; i < moduleCount && i < 1024; i++) {
+                        MODULEINFO modInfo;
+                        if (GetModuleInformation(hProcess, hMods[i], &modInfo, sizeof(modInfo))) {
+                            UINT64 modStart = (UINT64)modInfo.lpBaseOfDll;
+                            UINT64 modEnd = modStart + modInfo.SizeOfImage;
+                            
+                            if (target_addr >= modStart && target_addr < modEnd) {
+                                char modName[MAX_PATH];
+                                if (GetModuleFileNameExA(hProcess, hMods[i], modName, sizeof(modName))) {
+                                    len += wsprintfA(debugBuffer + len,
+                                        "  TARGET IN MODULE: %s\r\n"
+                                        "    Base: %p, Size: %u bytes\r\n"
+                                        "    Offset in module: 0x%08X\r\n",
+                                        modName,
+                                        modInfo.lpBaseOfDll,
+                                        modInfo.SizeOfImage,
+                                        (UINT32)(target_addr - modStart));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                len += wsprintfA(debugBuffer + len, 
+                    "\r\n================================================\r\n\r\n");
+                
+                DWORD written;
+                WriteFile(hLogFile, debugBuffer, len, &written, NULL);
+                CloseHandle(hLogFile);
+            }
         }
     }
     
