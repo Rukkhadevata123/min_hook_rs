@@ -4,7 +4,7 @@
 //! ## Usage
 //!
 //! 1. **Get login data**:
-//!    - Visit: https://sdk.biligame.com/login/?gameId=4963&appKey=fd1098c0489c4d00a08aa8a15e484d6c&sdk_ver=5.6.0
+//!    - Visit: https://sdk.biligame.com/login/?gameId=4963&appKey=fd1098c0489c4d00a08aa8a15e484d6c&sdk_ver=3.5.0
 //!    - Press F12 -> Console -> Input: `loginSuccess=(data)=>{console.log(JSON.parse(data))}`
 //!    - After login, copy JSON data to login.json (UTF-8 encoding, single line)
 //!
