@@ -29,7 +29,6 @@ struct FunctionOffsets {
     set_active: u32,
     event_camera_move: u32,
     show_one_damage_text_ex: u32,
-    switch_input_device_to_touch_screen: u32,
     craft_entry: u32,
     craft_entry_partner: u32,
 }
@@ -57,7 +56,6 @@ struct IslandEnvironment {
     hide_quest_banner: i32,         // BOOL
     disable_event_camera_move: i32, // BOOL
     disable_show_damage_text: i32,  // BOOL
-    using_touch_screen: i32,        // BOOL
     redirect_craft_entry: i32,      // BOOL
 }
 
@@ -72,7 +70,6 @@ struct GameConfig {
     remove_team_anim: bool,
     disable_event_camera: bool,
     hide_damage: bool,
-    touch_screen: bool,
     redirect_craft: bool,
 }
 
@@ -87,7 +84,6 @@ impl Default for GameConfig {
             remove_team_anim: false,
             disable_event_camera: false,
             hide_damage: false,
-            touch_screen: false,
             redirect_craft: false,
         }
     }
@@ -119,7 +115,6 @@ impl HutaoInjector {
         set_active: 277740368,
         event_camera_move: 186643424,
         show_one_damage_text_ex: 204578400,
-        switch_input_device_to_touch_screen: 144617776,
         craft_entry: 127845632,
         craft_entry_partner: 201143472,
     };
@@ -252,7 +247,6 @@ impl HutaoInjector {
             (*p_env).hide_quest_banner = if config.hide_banner { 1 } else { 0 };
             (*p_env).disable_event_camera_move = if config.disable_event_camera { 1 } else { 0 };
             (*p_env).disable_show_damage_text = if config.hide_damage { 1 } else { 0 };
-            (*p_env).using_touch_screen = if config.touch_screen { 1 } else { 0 };
             (*p_env).redirect_craft_entry = if config.redirect_craft { 1 } else { 0 };
             (*p_env).state = IslandState::Started;
         }
@@ -549,7 +543,6 @@ impl HutaoInjector {
                     (*p_env).remove_open_team_progress = 0;
                     (*p_env).disable_event_camera_move = 0;
                     (*p_env).disable_show_damage_text = 0;
-                    (*p_env).using_touch_screen = 0;
                     (*p_env).redirect_craft_entry = 0;
                     println!("[OK] All settings have been reset to defaults");
                 }
@@ -617,14 +610,6 @@ impl HutaoInjector {
                     "hidden"
                 } else {
                     "visible"
-                }
-            );
-            println!(
-                "Touch screen: {}",
-                if (*p_env).using_touch_screen != 0 {
-                    "enabled"
-                } else {
-                    "disabled"
                 }
             );
             println!(
@@ -751,7 +736,7 @@ impl HutaoInjector {
                                 &mut user_time,
                             ) != 0
                             {
-                                // Compare file times manually since CompareFileTime isn't available
+                                // Compare file times manually
                                 let creation_u64 = ((creation_time.dwHighDateTime as u64) << 32)
                                     | (creation_time.dwLowDateTime as u64);
                                 let earliest_u64 = ((earliest_time.dwHighDateTime as u64) << 32)
@@ -903,7 +888,6 @@ fn main() {
         remove_team_anim: get_bool_input("Remove team open animation?", false),
         disable_event_camera: get_bool_input("Disable event camera movement?", false),
         hide_damage: get_bool_input("Hide damage numbers?", false),
-        touch_screen: get_bool_input("Enable touch screen mode?", false),
         redirect_craft: get_bool_input("Redirect crafting table?", false),
     };
 

@@ -1,4 +1,3 @@
-mod hutao_seh;
 use min_hook_rs::*;
 use std::ffi::{CString, c_void};
 use std::mem;
@@ -26,7 +25,7 @@ struct Il2CppString {
     chars: [u16; 32],
 }
 
-// Function types - using correct calling convention
+// Function types
 type FindString = unsafe extern "system" fn(*const i8) -> *mut Il2CppString;
 type SetFieldOfViewMethod = unsafe extern "system" fn(*mut c_void, f32);
 type SetEnableFogRenderingMethod = unsafe extern "system" fn(bool);
@@ -49,7 +48,6 @@ type ShowOneDamageTextExMethod = unsafe extern "system" fn(
     *mut c_void,
     i32,
 );
-type SwitchInputDeviceToTouchScreenMethod = unsafe extern "system" fn(*mut c_void);
 type CraftEntryMethod = unsafe extern "system" fn(*mut c_void);
 type CraftEntryMethodPartner = unsafe extern "system" fn(
     *mut Il2CppString,
@@ -84,7 +82,6 @@ struct FunctionOffsets {
     set_active: u32,
     event_camera_move: u32,
     show_one_damage_text_ex: u32,
-    switch_input_device_to_touch_screen: u32,
     craft_entry: u32,
     craft_entry_partner: u32,
 }
@@ -103,7 +100,6 @@ struct IslandEnvironment {
     hide_quest_banner: i32,         // BOOL
     disable_event_camera_move: i32, // BOOL
     disable_show_damage_text: i32,  // BOOL
-    using_touch_screen: i32,        // BOOL
     redirect_craft_entry: i32,      // BOOL
 }
 
@@ -122,7 +118,6 @@ struct OriginalFunctions {
     set_active: Option<SetActiveMethod>,
     event_camera_move: Option<EventCameraMoveMethod>,
     show_one_damage_text_ex: Option<ShowOneDamageTextExMethod>,
-    switch_input_device_to_touch_screen: Option<SwitchInputDeviceToTouchScreenMethod>,
     craft_entry: Option<CraftEntryMethod>,
     craft_entry_partner: Option<CraftEntryMethodPartner>,
 }
@@ -143,11 +138,9 @@ static ORIGINALS: Mutex<OriginalFunctions> = Mutex::new(OriginalFunctions {
     set_active: None,
     event_camera_move: None,
     show_one_damage_text_ex: None,
-    switch_input_device_to_touch_screen: None,
     craft_entry: None,
     craft_entry_partner: None,
 });
-static mut TOUCH_SCREEN_INITIALIZED: bool = false;
 
 // Memory protection disabling
 unsafe extern "system" {
@@ -189,6 +182,7 @@ fn disable_protect_virtual_memory() {
     }
 }
 
+// FOV endpoint handler
 unsafe extern "system" fn set_field_of_view_endpoint(p_this: *mut c_void, value: f32) {
     unsafe {
         if P_ENVIRONMENT.is_null() {
@@ -197,51 +191,41 @@ unsafe extern "system" fn set_field_of_view_endpoint(p_this: *mut c_void, value:
 
         let env = &*P_ENVIRONMENT;
 
-        let (touch_fn, frame_rate_fn, fov_fn, fog_fn) = {
+        let (frame_rate_fn, fov_fn, fog_fn) = {
             let originals = ORIGINALS.lock().unwrap();
             (
-                originals.switch_input_device_to_touch_screen,
                 originals.set_target_frame_rate,
                 originals.set_field_of_view,
                 originals.set_enable_fog_rendering,
             )
         };
 
-        // Touch screen initialization
-        if !TOUCH_SCREEN_INITIALIZED && env.using_touch_screen != 0 {
-            TOUCH_SCREEN_INITIALIZED = true;
-            if let Some(touch_fn) = touch_fn {
-                match hutao_seh::try_seh(|| {
-                    touch_fn(ptr::null_mut());
-                }) {
-                    Ok(_) => {}
-                    Err(_) => {}
-                }
-            }
-        }
-
+        // Set target frame rate
         if let Some(frame_rate_fn) = frame_rate_fn {
             frame_rate_fn(env.target_frame_rate);
         }
 
+        // Handle FOV and fog based on current view value
         if value.floor() <= 30.0 {
+            // Low FOV scene
             if let Some(fog_fn) = fog_fn {
-                fog_fn(false);
+                fog_fn(false); // Always disable fog in low FOV scenes
             }
             if let Some(fov_fn) = fov_fn {
                 let fov_value = if env.fix_low_fov_scene != 0 {
-                    value
+                    env.field_of_view // Use user-defined FOV
                 } else {
-                    env.field_of_view
+                    value // Keep original low FOV
                 };
                 fov_fn(p_this, fov_value);
             }
         } else {
+            // Normal FOV scene
             if let Some(fog_fn) = fog_fn {
-                fog_fn(env.disable_fog == 0);
+                fog_fn(env.disable_fog == 0); // Respect user fog setting
             }
             if let Some(fov_fn) = fov_fn {
-                fov_fn(p_this, env.field_of_view);
+                fov_fn(p_this, env.field_of_view); // Use user-defined FOV
             }
         }
     }
@@ -255,7 +239,6 @@ unsafe extern "system" fn open_team_endpoint() {
 
         let env = &*P_ENVIRONMENT;
 
-        // Get function pointers
         let (check_fn, page_fn, team_fn) = {
             let originals = ORIGINALS.lock().unwrap();
             (
@@ -265,7 +248,6 @@ unsafe extern "system" fn open_team_endpoint() {
             )
         };
 
-        // CORRECTED: Exact C++ logic translation
         let should_use_page_fn =
             env.remove_open_team_progress != 0 && check_fn.is_some_and(|f| f());
 
@@ -333,7 +315,6 @@ unsafe extern "system" fn event_camera_move_endpoint(
         if env.disable_event_camera_move != 0 {
             true
         } else {
-            // Get lock and immediately get required function pointer
             let camera_fn = {
                 let originals = ORIGINALS.lock().unwrap();
                 originals.event_camera_move
@@ -370,7 +351,6 @@ unsafe extern "system" fn show_one_damage_text_ex_endpoint(
             return;
         }
 
-        // Get lock and immediately get required function pointer
         let damage_fn = {
             let originals = ORIGINALS.lock().unwrap();
             originals.show_one_damage_text_ex
@@ -437,7 +417,7 @@ fn install_min_hooks(base: u64, env: &IslandEnvironment) -> Result<()> {
 
         let mut originals = ORIGINALS.lock().unwrap();
 
-        // Fix transmute annotations
+        // Store original function pointers
         originals.find_string = Some(mem::transmute::<*mut c_void, FindString>(
             (base + env.function_offsets.find_string as u64) as *mut c_void,
         ));
@@ -464,17 +444,12 @@ fn install_min_hooks(base: u64, env: &IslandEnvironment) -> Result<()> {
         originals.set_active = Some(mem::transmute::<*mut c_void, SetActiveMethod>(
             (base + env.function_offsets.set_active as u64) as *mut c_void,
         ));
-        originals.switch_input_device_to_touch_screen = Some(mem::transmute::<
-            *mut c_void,
-            SwitchInputDeviceToTouchScreenMethod,
-        >(
-            (base + env.function_offsets.switch_input_device_to_touch_screen as u64) as *mut c_void,
-        ));
         originals.craft_entry_partner =
             Some(mem::transmute::<*mut c_void, CraftEntryMethodPartner>(
                 (base + env.function_offsets.craft_entry_partner as u64) as *mut c_void,
             ));
 
+        // Create hooks
         let target = (base + env.function_offsets.set_field_of_view as u64) as *mut c_void;
         let trampoline = create_hook(target, set_field_of_view_endpoint as *mut c_void)?;
         originals.set_field_of_view = Some(mem::transmute::<*mut c_void, SetFieldOfViewMethod>(
@@ -549,7 +524,7 @@ extern "system" fn island_thread(lp_param: *mut c_void) -> u32 {
             return GetLastError();
         }
 
-        // Wait indefinitely like C++ version
+        // Wait indefinitely
         WaitForSingleObject(GetCurrentThread(), u32::MAX);
 
         // Cleanup
@@ -573,10 +548,9 @@ extern "system" fn island_get_window_hook_impl(
     unsafe { CallNextHookEx(ptr::null_mut(), code, w_param, l_param) }
 }
 
-// Export functions - Updated following upstream changes
+// Export functions
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn DllGetWindowsHookForHutao(p_hook_proc: *mut *mut c_void) -> HRESULT {
-    // We don't handle package family checks - keep it simple
     unsafe {
         *p_hook_proc = island_get_window_hook_impl as *mut c_void;
         0 // S_OK
