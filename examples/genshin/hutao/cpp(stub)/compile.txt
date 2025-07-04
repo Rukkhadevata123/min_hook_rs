@@ -1,3 +1,4 @@
 cl /std:c++17 /LD hutao_minhook.cpp /DEF:hutao_dll.def /Fe:hutao_minhook.dll
 cl /EHsc /O2 /MT /std:c++17 hutao_injector.cpp /Fe:hutao_injector.exe
+cl /EHsc /O2 /MT /std:c++17 hutao_launcher.cpp /Fe:hutao_launcher.exe
 sudo .\hutao_injector.exe "D:\Program Files\Genshin Impact\Genshin Impact Game\YuanShen.exe" "hutao_minhook.dll"

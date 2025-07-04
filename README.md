@@ -10,7 +10,7 @@ A Rust implementation of the MinHook library for Windows x64 function hooking.
 
 ```toml
 [dependencies]
-min_hook_rs = "1.3"
+min_hook_rs = "2.0"
 windows-sys = { version = "0.60", features = [
     "Win32_UI_WindowsAndMessaging", 
     "Win32_Foundation"
@@ -169,10 +169,10 @@ fn main() -> Result<()> {
 }
 ```
 
-The output may be
+Expected output:
 
 ```plaintext
-MinHook-rs MessageBox Hook Demo                                                                                                                                     
+MinHook-rs MessageBox Hook Demo
 ================================
 
 [PHASE 1] Testing original MessageBox behavior
@@ -300,7 +300,6 @@ apply_queued() -> Result<()>
 
 ```rust
 decode_instruction(code: &[u8]) -> HookInstruction
-can_hook_safely(code: &[u8], hook_size: usize) -> bool
 status_to_string(error: HookError) -> &'static str
 ```
 
@@ -373,14 +372,58 @@ match create_hook_api("user32", "MessageBoxA", hook_fn as *mut c_void) {
 }
 ```
 
-## x86_64 Instruction Format
+## x86_64 Instruction Structure
 
-x86_64 instructions have variable-length encoding:
+x86_64 instructions use variable-length encoding (1-15 bytes):
 
 ```
 [Prefixes] [REX] [Opcode] [ModR/M] [SIB] [Displacement] [Immediate]
    0-4      0-1    1-3      0-1     0-1      0-8          0-8     (bytes)
 ```
+
+### Instruction Components
+
+**Legacy Prefixes (0-4 bytes):**
+
+- `F0` - LOCK prefix
+- `F2/F3` - REP/REPE/REPNE prefixes  
+- `2E/36/3E/26/64/65` - Segment override
+- `66` - Operand size override (16-bit)
+- `67` - Address size override
+
+**REX Prefix (0-1 byte, x64 only):**
+
+```
+4     3     2     1     0
+W     R     X     B
+```
+
+- W: 64-bit operand size
+- R: Extension of ModR/M reg field
+- X: Extension of SIB index field  
+- B: Extension of ModR/M r/m or SIB base field
+
+**ModR/M Byte:**
+
+```
+7   6     5   3     2   0
+mod       reg       r/m
+```
+
+- `mod`: Addressing mode (00/01/10/11)
+- `reg`: Register or opcode extension
+- `r/m`: Register or memory operand
+
+**SIB Byte (if ModR/M indicates):**
+
+```
+7   6     5   3     2   0
+scale     index     base
+```
+
+- `scale`: 1, 2, 4, or 8 times multiplier
+- `index`: Index register
+- `base`: Base register
 
 ### Critical Instructions for Hooking
 
@@ -392,7 +435,7 @@ lea rax, [rip + offset]      ; 48 8D 05 xx xx xx xx
 call [rip + offset]          ; FF 15 xx xx xx xx
 ```
 
-**Control flow instructions**:
+**Direct relative jumps/calls:**
 
 ```asm
 call rel32                  ; E8 xx xx xx xx
@@ -400,88 +443,96 @@ jmp rel32                   ; E9 xx xx xx xx
 jz rel32                    ; 0F 84 xx xx xx xx
 ```
 
-### Instruction Analysis
+### Instruction Analysis Example
 
 ```rust
 let code = &[0x48, 0x8B, 0x05, 0x12, 0x34, 0x56, 0x78];
 let inst = decode_instruction(code);
 
-println!("Length: {}", inst.len);
-println!("RIP-relative: {}", inst.is_rip_relative());
-println!("Displacement: 0x{:08X}", inst.displacement);
-
-if can_hook_safely(&[0x48, 0x83, 0xEC, 0x28], 5) {
-    println!("Safe to install 5-byte hook");
-}
+println!("Length: {}", inst.len);            // 7
+println!("RIP-relative: {}", inst.is_rip_relative()); // true
+println!("Displacement: 0x{:08X}", inst.displacement); // 0x78563412
 ```
 
 ## Hook Implementation
 
-Function hooking works by code patching:
+Function hooking replaces the target function's prologue with a jump to the detour:
 
 ```
-Original: [Target] -> [Function Body] -> [Return]
-Hooked:   [Target] -> [Hook] -> [Trampoline] -> [Original Body] -> [Return]
+Original: [Function Prologue] -> [Function Body] -> [Return]
+Hooked:   [JMP to Relay] -> [Detour] -> [Trampoline] -> [Original Body] -> [Return]
 ```
 
-Process:
+### Process Steps
 
-1. **Analysis**: Decode instructions at hook location
-2. **Trampoline**: Allocate memory, copy displaced instructions
-3. **Relocation**: Fix RIP-relative addresses
-4. **Installation**: Replace function start with jump to hook
-5. **Thread Safety**: Suspend threads during patching
+1. **Disassemble**: Decode instructions at target location
+2. **Relocate**: Fix RIP-relative addresses in copied instructions  
+3. **Trampoline**: Create executable memory with original code + jump back
+4. **Relay**: Create x64 absolute jump to detour function
+5. **Patch**: Atomically replace target prologue with jump to relay
+6. **Thread Safety**: Suspend/resume threads during patching
+
+### Memory Layout
+
+```
+Target Function:     [E9 xx xx xx xx] -> Jump to Relay
+                     [Original bytes backed up]
+
+Trampoline Buffer:   [Relocated original instructions]
+                     [JMP back to Target+5]
+                     [Relay: JMP to Detour]
+```
 
 ## Error Types
 
 | Error | Description |
 |-------|-------------|
 | `NotInitialized` | Call `initialize()` first |
-| `AlreadyCreated` | Hook already exists |
-| `NotCreated` | Hook doesn't exist |
+| `AlreadyCreated` | Hook already exists for target |
+| `NotCreated` | Hook doesn't exist for target |
 | `Enabled/Disabled` | Hook already in requested state |
-| `ModuleNotFound` | Module not loaded |
-| `FunctionNotFound` | Function not exported |
-| `UnsupportedFunction` | Cannot hook this function |
+| `ModuleNotFound` | Specified module not loaded |
+| `FunctionNotFound` | Function not exported by module |
+| `UnsupportedFunction` | Cannot hook this function safely |
 | `MemoryAlloc/MemoryProtect` | Memory operation failed |
 
 ## Best Practices
 
-### Hook Functions
+### Function Signatures
 
-- Match exact signatures including calling convention
-- Use `ptr::addr_of!` for thread-safe static access
-- Keep hook logic minimal for performance
-- Handle edge cases gracefully
+- Match exact calling conventions (`extern "system"` for Windows APIs)
+- Use proper parameter types and return values
+- Handle edge cases and error conditions
 
 ### Memory Management
 
 ```rust
 fn main() -> Result<()> {
-    initialize()?;                    // 1. Initialize
-    let (trampoline, target) = create_hook_api(...)?;  // 2. Create
-    enable_hook(target)?;             // 3. Enable
-    // ... use hooks ...
-    disable_hook(target)?;            // 4. Disable
-    remove_hook(target)?;             // 5. Remove
-    uninitialize()?;                  // 6. Cleanup
+    initialize()?;                    // 1. Initialize library
+    let (trampoline, target) = create_hook_api(...)?;  // 2. Create hook
+    enable_hook(target)?;             // 3. Enable hook
+    // ... application logic ...
+    disable_hook(target)?;            // 4. Disable hook
+    remove_hook(target)?;             // 5. Remove hook
+    uninitialize()?;                  // 6. Cleanup library
     Ok(())
 }
 ```
 
-### Safety
+### Safety Guidelines
 
-- Run as Administrator for system hooks
-- Validate target function addresses
-- Use correct calling conventions (`extern "system"`)
-- Proper cleanup to avoid crashes
+- Run as Administrator for system-level hooks
+- Validate function addresses before hooking
+- Use thread-safe access patterns for hook data
+- Proper cleanup prevents crashes and memory leaks
 
 ## Requirements
 
-- Architecture: x86_64
-- OS: Windows
-- Rust: 1.85.0+
+- **Architecture**: x86_64 only
+- **Operating System**: Windows
+- **Rust Version**: 1.85.0+
+- **Privileges**: Administrator for system hooks
 
 ## License
 
-MIT License
+MIT License - see LICENSE file for details.

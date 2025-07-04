@@ -29,6 +29,7 @@ compile_error!("This crate only supports x86_64 architecture");
 #[cfg(not(target_os = "windows"))]
 compile_error!("This crate only supports Windows");
 
+// Core modules
 pub mod buffer;
 pub mod disasm;
 pub mod error;
@@ -45,17 +46,30 @@ pub use hook::{
 };
 
 // Re-export for advanced usage
-pub use disasm::{HookInstruction, can_hook_safely, decode_instruction};
+pub use buffer::{MEMORY_SLOT_SIZE, allocate_buffer, free_buffer, is_executable_address};
+pub use disasm::{HookInstruction, decode_instruction};
+pub use instruction::{CallAbs, JccAbs, JccRel, JmpAbs, JmpRel, JmpRelShort, Trampoline};
 
 /// Library version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Library name
+pub const LIBRARY_NAME: &str = "MinHook-rs";
+
 /// Check if the current platform is supported
+#[inline]
 pub fn is_supported() -> bool {
     cfg!(target_arch = "x86_64") && cfg!(target_os = "windows")
 }
 
 /// Get library version string
+#[inline]
 pub fn get_version() -> &'static str {
     VERSION
+}
+
+/// Get library name
+#[inline]
+pub fn get_library_name() -> &'static str {
+    LIBRARY_NAME
 }

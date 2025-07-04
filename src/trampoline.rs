@@ -1,10 +1,9 @@
 //! Trampoline function creation for MinHook-rs
 //!
-//! This module handles creating trampoline functions that preserve original function behavior
-//! while redirecting execution to detour functions.
+//! Direct port of trampoline.c for x64, maintaining exact compatibility
 
 use crate::buffer::{allocate_buffer, is_executable_address};
-use crate::disasm::decode_instruction;
+use crate::disasm::{F_ERROR, decode_instruction};
 use crate::error::{HookError, Result};
 use crate::instruction::*;
 use std::ffi::c_void;
@@ -13,32 +12,32 @@ use std::ptr;
 #[cfg(not(target_arch = "x86_64"))]
 compile_error!("Trampoline module only supports x86_64 architecture");
 
-/// Maximum size of a trampoline function (buffer size - relay jump size)
+/// Maximum size of a trampoline function (64 - sizeof(JMP_ABS))
 const TRAMPOLINE_MAX_SIZE: usize = 64 - size_of::<JmpAbs>();
 
-/// Minimum size required for hook installation (5 bytes for JMP rel32)
-const MIN_HOOK_SIZE: usize = 5;
+/// Size of JMP_REL (E9 xxxxxxxx) for minimum hook size
+const JMP_REL_SIZE: usize = 5;
 
-/// Size of short jump instruction
-const SHORT_JMP_SIZE: usize = 2;
+/// Size of short jump (EB xx)  
+const JMP_REL_SHORT_SIZE: usize = 2;
 
-/// Check if memory region contains only padding bytes
-fn is_code_padding(code: &[u8]) -> bool {
-    if code.is_empty() {
+/// Check if memory region contains only padding bytes (like original IsCodePadding)
+fn is_code_padding(inst: &[u8]) -> bool {
+    if inst.is_empty() {
         return false;
     }
 
-    let first_byte = code[0];
+    let first_byte = inst[0];
     if first_byte != 0x00 && first_byte != 0x90 && first_byte != 0xCC {
         return false;
     }
 
-    code.iter().all(|&byte| byte == first_byte)
+    inst.iter().all(|&byte| byte == first_byte)
 }
 
-/// Create a trampoline function based on original MinHook logic
+/// Create trampoline function - direct port of CreateTrampolineFunction
 pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
-    // Pre-defined instruction templates for x64
+    // Pre-defined instruction templates (exactly like original)
     let call_abs = CallAbs {
         opcode0: 0xFF,
         opcode1: 0x15,
@@ -66,37 +65,39 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
 
     let mut old_pos = 0u8;
     let mut new_pos = 0u8;
-    let mut jmp_dest = 0usize; // Destination address of internal jumps
-    let mut finished = false;
-    let mut inst_buf = [0u8; 16];
+    let mut jmp_dest = 0usize; // Destination address of an internal jump
+    let mut finished = false; // Is the function completed?
+    let mut inst_buf = [0u8; 16]; // Buffer for modified instructions
 
     trampoline.patch_above = false;
     trampoline.n_ip = 0;
 
+    // Main disassembly loop (replaces do-while from C)
     loop {
-        let old_inst_addr = trampoline.target as usize + old_pos as usize;
-        let new_inst_addr = trampoline.trampoline as usize + new_pos as usize;
+        let p_old_inst = trampoline.target as usize + old_pos as usize;
+        let p_new_inst = trampoline.trampoline as usize + new_pos as usize;
 
-        // Read instruction bytes
-        let code_slice = unsafe { std::slice::from_raw_parts(old_inst_addr as *const u8, 16) };
+        // Read and disassemble instruction
+        let code_slice = unsafe { std::slice::from_raw_parts(p_old_inst as *const u8, 16) };
+        let hs = decode_instruction(code_slice);
 
-        let inst = decode_instruction(code_slice);
-        if inst.error {
+        if (hs.flags & F_ERROR) != 0 {
             return Err(HookError::UnsupportedFunction);
         }
 
-        let mut copy_size = inst.len as usize;
-        let mut copy_src = old_inst_addr as *const u8;
+        let mut copy_size = hs.len as usize;
+        let mut copy_src = p_old_inst as *const u8;
 
-        // Check if we have enough bytes for the hook
-        if old_pos >= MIN_HOOK_SIZE as u8 {
-            // Complete the trampoline with jump back to original function
-            let mut final_jmp = jmp_abs;
-            final_jmp.address = old_inst_addr as u64;
+        // Check if we have enough bytes for the hook (like original)
+        if old_pos >= JMP_REL_SIZE as u8 {
+            // The trampoline function is long enough.
+            // Complete the function with the jump to the target function.
+            let mut jmp = jmp_abs;
+            jmp.address = p_old_inst as u64;
 
             unsafe {
                 ptr::copy_nonoverlapping(
-                    &final_jmp as *const JmpAbs as *const u8,
+                    &jmp as *const JmpAbs as *const u8,
                     inst_buf.as_mut_ptr(),
                     size_of::<JmpAbs>(),
                 );
@@ -106,40 +107,49 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
             copy_size = size_of::<JmpAbs>();
             finished = true;
         }
-        // Handle RIP-relative addressing instructions
-        else if inst.is_rip_relative() {
-            // Copy instruction to buffer and modify RIP-relative address
+        // Instructions using RIP relative addressing (ModR/M = 00???101B)
+        else if (hs.modrm & 0xC7) == 0x05 {
+            // Modify the RIP relative address
             unsafe {
-                ptr::copy_nonoverlapping(
-                    old_inst_addr as *const u8,
-                    inst_buf.as_mut_ptr(),
-                    inst.len as usize,
-                );
+                ptr::copy_nonoverlapping(p_old_inst as *const u8, inst_buf.as_mut_ptr(), copy_size);
             }
-
-            // Relative address is stored at (instruction length - immediate value length - 4)
-            let imm_size = inst.immediate_size() as usize;
-            let rel_addr_offset = inst.len as usize - imm_size - 4;
-            let rel_addr_ptr = unsafe { inst_buf.as_mut_ptr().add(rel_addr_offset) as *mut u32 };
-
-            let original_target = old_inst_addr + inst.len as usize + inst.displacement as usize;
-            let new_relative =
-                (original_target as i64 - (new_inst_addr + inst.len as usize) as i64) as u32;
-
-            unsafe {
-                *rel_addr_ptr = new_relative;
-            }
-
             copy_src = inst_buf.as_ptr();
 
-            // Complete the function if indirect JMP (FF /4)
-            if inst.opcode == 0xFF && (inst.modrm >> 3 & 7) == 4 {
+            // Calculate relative address offset - avoid misaligned pointer dereference
+            let imm_len = ((hs.flags & 0x3C) >> 2) as usize; // Extract immediate length from flags
+            let rel_addr_offset = hs.len as usize - imm_len - 4;
+
+            // Read the current relative address using aligned access
+            let _current_rel_addr = {
+                let bytes = [
+                    inst_buf[rel_addr_offset],
+                    inst_buf[rel_addr_offset + 1],
+                    inst_buf[rel_addr_offset + 2],
+                    inst_buf[rel_addr_offset + 3],
+                ];
+                u32::from_le_bytes(bytes)
+            };
+
+            // Calculate new relative address
+            let original_target = p_old_inst + hs.len as usize + hs.displacement as usize;
+            let new_relative =
+                (original_target as i64 - (p_new_inst + hs.len as usize) as i64) as u32;
+
+            // Write the new relative address using aligned access
+            let new_bytes = new_relative.to_le_bytes();
+            inst_buf[rel_addr_offset] = new_bytes[0];
+            inst_buf[rel_addr_offset + 1] = new_bytes[1];
+            inst_buf[rel_addr_offset + 2] = new_bytes[2];
+            inst_buf[rel_addr_offset + 3] = new_bytes[3];
+
+            // Complete the function if JMP (FF /4)
+            if hs.opcode == 0xFF && hs.modrm_reg == 4 {
                 finished = true;
             }
         }
-        // Handle direct relative CALL
-        else if inst.opcode == 0xE8 {
-            let dest = old_inst_addr + inst.len as usize + inst.immediate as usize;
+        // Direct relative CALL
+        else if hs.opcode == 0xE8 {
+            let dest = p_old_inst + hs.len as usize + hs.immediate as usize;
 
             let mut call = call_abs;
             call.address = dest as u64;
@@ -155,26 +165,26 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
             copy_src = inst_buf.as_ptr();
             copy_size = size_of::<CallAbs>();
         }
-        // Handle direct relative JMP (EB or E9)
-        else if (inst.opcode & 0xFD) == 0xE9 {
-            let dest = old_inst_addr + inst.len as usize;
-            let dest = if inst.opcode == 0xEB {
-                // Short jump (8-bit signed offset)
-                dest + (inst.immediate as i8) as usize
-            } else {
-                // Long jump (32-bit signed offset)
-                dest + inst.immediate as usize
-            };
+        // Direct relative JMP (EB or E9)
+        else if (hs.opcode & 0xFD) == 0xE9 {
+            let mut dest = p_old_inst + hs.len as usize;
 
-            // Simply copy internal jumps
+            if hs.opcode == 0xEB {
+                // Short jump
+                dest = dest.wrapping_add((hs.immediate as i8) as usize);
+            } else {
+                // Long jump
+                dest = dest.wrapping_add(hs.immediate as usize);
+            }
+
+            // Simply copy an internal jump
             if (trampoline.target as usize) <= dest
-                && dest < (trampoline.target as usize + MIN_HOOK_SIZE)
+                && dest < (trampoline.target as usize + JMP_REL_SIZE)
             {
                 if jmp_dest < dest {
                     jmp_dest = dest;
                 }
             } else {
-                // External jump - convert to absolute
                 let mut jmp = jmp_abs;
                 jmp.address = dest as u64;
 
@@ -190,45 +200,45 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
                 copy_size = size_of::<JmpAbs>();
 
                 // Exit the function if it is not in the branch
-                finished = old_inst_addr >= jmp_dest;
+                finished = p_old_inst >= jmp_dest;
             }
         }
-        // Handle conditional jumps and LOOP instructions
-        else if (inst.opcode & 0xF0) == 0x70
-            || (inst.opcode & 0xFC) == 0xE0
-            || (inst.opcode2 & 0xF0) == 0x80
+        // Direct relative Jcc
+        else if (hs.opcode & 0xF0) == 0x70
+            || (hs.opcode & 0xFC) == 0xE0
+            || (hs.opcode2 & 0xF0) == 0x80
         {
-            let dest = old_inst_addr + inst.len as usize;
-            let dest = if (inst.opcode & 0xF0) == 0x70 || (inst.opcode & 0xFC) == 0xE0 {
-                // Short conditional jump or LOOP instruction
-                dest + (inst.immediate as i8) as usize
-            } else {
-                // Long conditional jump (0F 8x)
-                dest + inst.immediate as usize
-            };
+            let mut dest = p_old_inst + hs.len as usize;
 
-            // Simply copy internal jumps
+            if (hs.opcode & 0xF0) == 0x70      // Jcc
+                || (hs.opcode & 0xFC) == 0xE0
+            // LOOPNZ/LOOPZ/LOOP/JECXZ
+            {
+                dest = dest.wrapping_add((hs.immediate as i8) as usize);
+            } else {
+                dest = dest.wrapping_add(hs.immediate as usize);
+            }
+
+            // Simply copy an internal jump
             if (trampoline.target as usize) <= dest
-                && dest < (trampoline.target as usize + MIN_HOOK_SIZE)
+                && dest < (trampoline.target as usize + JMP_REL_SIZE)
             {
                 if jmp_dest < dest {
                     jmp_dest = dest;
                 }
-            } else if (inst.opcode & 0xFC) == 0xE0 {
+            } else if (hs.opcode & 0xFC) == 0xE0 {
                 // LOOPNZ/LOOPZ/LOOP/JCXZ/JECXZ to the outside are not supported
                 return Err(HookError::UnsupportedFunction);
             } else {
-                // External conditional jump - convert to absolute form
-                let condition = if inst.opcode != 0x0F {
-                    inst.opcode
+                let cond = if hs.opcode != 0x0F {
+                    hs.opcode
                 } else {
-                    inst.opcode2
+                    hs.opcode2
                 } & 0x0F;
 
                 // Invert the condition in x64 mode to simplify the conditional jump logic
-                // This matches the original MinHook approach
                 let mut jcc = jcc_abs;
-                jcc.opcode = 0x71 ^ condition;
+                jcc.opcode = 0x71 ^ cond;
                 jcc.address = dest as u64;
 
                 unsafe {
@@ -243,23 +253,23 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
                 copy_size = size_of::<JccAbs>();
             }
         }
-        // Handle RET instructions
-        else if (inst.opcode & 0xFE) == 0xC2 {
+        // RET (C2 or C3)
+        else if (hs.opcode & 0xFE) == 0xC2 {
             // Complete the function if not in a branch
-            finished = old_inst_addr >= jmp_dest;
+            finished = p_old_inst >= jmp_dest;
         }
 
         // Can't alter the instruction length in a branch
-        if old_inst_addr < jmp_dest && copy_size != inst.len as usize {
+        if p_old_inst < jmp_dest && copy_size != hs.len as usize {
             return Err(HookError::UnsupportedFunction);
         }
 
         // Trampoline function is too large
-        if new_pos as usize + copy_size > TRAMPOLINE_MAX_SIZE {
+        if (new_pos as usize + copy_size) > TRAMPOLINE_MAX_SIZE {
             return Err(HookError::UnsupportedFunction);
         }
 
-        // Trampoline function has too many instructions
+        // Trampoline function has too many instructions (ARRAYSIZE(ct->oldIPs) = 8)
         if trampoline.n_ip >= 8 {
             return Err(HookError::UnsupportedFunction);
         }
@@ -269,7 +279,7 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         trampoline.new_ips[trampoline.n_ip as usize] = new_pos;
         trampoline.n_ip += 1;
 
-        // Copy instruction using ptr::copy_nonoverlapping (like original)
+        // Copy instruction (like __movsb in original)
         unsafe {
             ptr::copy_nonoverlapping(
                 copy_src,
@@ -279,7 +289,7 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         }
 
         new_pos += copy_size as u8;
-        old_pos += inst.len;
+        old_pos += hs.len;
 
         if finished {
             break;
@@ -287,17 +297,25 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
     }
 
     // Is there enough place for a long jump?
-    if (old_pos as usize) < MIN_HOOK_SIZE {
-        let remaining = MIN_HOOK_SIZE - old_pos as usize;
-        let padding_addr = unsafe { (trampoline.target as *const u8).add(old_pos as usize) };
-        let padding_slice = unsafe { std::slice::from_raw_parts(padding_addr, remaining) };
+    if (old_pos as usize) < JMP_REL_SIZE {
+        let remaining = JMP_REL_SIZE - old_pos as usize;
+        let padding_slice = unsafe {
+            std::slice::from_raw_parts(
+                (trampoline.target as *const u8).add(old_pos as usize),
+                remaining,
+            )
+        };
 
         if !is_code_padding(padding_slice) {
             // Is there enough place for a short jump?
-            if (old_pos as usize) < SHORT_JMP_SIZE {
-                let short_remaining = SHORT_JMP_SIZE - old_pos as usize;
-                let short_padding_slice =
-                    unsafe { std::slice::from_raw_parts(padding_addr, short_remaining) };
+            if (old_pos as usize) < JMP_REL_SHORT_SIZE {
+                let short_remaining = JMP_REL_SHORT_SIZE - old_pos as usize;
+                let short_padding_slice = unsafe {
+                    std::slice::from_raw_parts(
+                        (trampoline.target as *const u8).add(old_pos as usize),
+                        short_remaining,
+                    )
+                };
 
                 if !is_code_padding(short_padding_slice) {
                     return Err(HookError::UnsupportedFunction);
@@ -305,13 +323,15 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
             }
 
             // Can we place the long jump above the function?
-            let above_addr = unsafe { (trampoline.target as *const u8).sub(MIN_HOOK_SIZE) };
+            let above_addr =
+                unsafe { (trampoline.target as *const u8).sub(JMP_REL_SIZE) as *mut c_void };
 
-            if !is_executable_address(above_addr as *mut c_void) {
+            if !is_executable_address(above_addr) {
                 return Err(HookError::UnsupportedFunction);
             }
 
-            let above_slice = unsafe { std::slice::from_raw_parts(above_addr, MIN_HOOK_SIZE) };
+            let above_slice =
+                unsafe { std::slice::from_raw_parts(above_addr as *const u8, JMP_REL_SIZE) };
 
             if !is_code_padding(above_slice) {
                 return Err(HookError::UnsupportedFunction);
@@ -321,7 +341,7 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         }
     }
 
-    // Create relay function (points to detour)
+    // Create a relay function (exactly like original)
     let mut relay_jmp = jmp_abs;
     relay_jmp.address = trampoline.detour as u64;
 
