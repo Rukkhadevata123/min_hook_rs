@@ -81,6 +81,26 @@ private:
         201143472   // MickeyWonderCombineEntryPartner
     };
 
+    /*
+    87242192    = 0x5345050   // MickeyWonder
+    4830752     = 0x49BA20    // MickeyWonderPartner  
+    215314944   = 0xCD57000   // MickeyWonderPartner2
+    17204528    = 0x1069CB0   // SetFieldOfView
+    277807600   = 0x10908470  // SetEnableFogRendering
+    277729120   = 0x108F7E60  // SetTargetFrameRate
+    118414576   = 0x70D8970   // OpenTeam
+    118384496   = 0x70D0770   // OpenTeamPageAccordingly
+    156982512   = 0x95C4370   // CheckCanEnter
+    124927536   = 0x7714830   // SetupQuestBanner
+    277741040   = 0x10903E70  // FindGameObject
+    277740368   = 0x10903BD0  // SetActive
+    186643424   = 0xB202260   // EventCameraMove
+    204578400   = 0xC33B4E0   // ShowOneDamageTextEx
+    144617776   = 0x8A045B0   // SwitchInputDeviceToTouchScreen
+    127845632   = 0x79EE400   // MickeyWonderCombineEntry
+    201143472   = 0xBFD0230   // MickeyWonderCombineEntryPartner
+    */
+
     HANDLE hMemoryMappedFile;
     LPVOID pSharedMemory;
     HANDLE hProcess;

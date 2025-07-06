@@ -37,18 +37,26 @@ pub mod hook;
 pub mod instruction;
 pub mod trampoline;
 
-// Re-export main API
+// Re-export core types
 pub use error::{HookError, Result};
-pub use hook::{
-    ALL_HOOKS, apply_queued, create_hook, create_hook_api, create_hook_api_ex, disable_hook,
-    enable_hook, initialize, queue_disable_hook, queue_enable_hook, remove_hook, status_to_string,
-    uninitialize,
-};
 
-// Re-export for advanced usage
-pub use buffer::{MEMORY_SLOT_SIZE, allocate_buffer, free_buffer, is_executable_address};
-pub use disasm::{HookInstruction, decode_instruction};
-pub use instruction::{CallAbs, JccAbs, JccRel, JmpAbs, JmpRel, JmpRelShort, Trampoline};
+// Re-export main API functions (Rust-style only)
+#[rustfmt::skip]
+pub use hook::{
+    initialize,
+    uninitialize,
+    create_hook,
+    create_hook_api,
+    create_hook_api_ex,
+    remove_hook,
+    enable_hook,
+    disable_hook,
+    queue_enable_hook,
+    queue_disable_hook,
+    apply_queued,
+    status_to_string,
+    ALL_HOOKS,
+};
 
 /// Library version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

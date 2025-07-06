@@ -537,7 +537,7 @@ impl HutaoInjector {
                     // Restore default values
                     (*p_env).target_frame_rate = 60;
                     (*p_env).field_of_view = 45.0;
-                    (*p_env).fix_low_fov_scene = 1;
+                    (*p_env).fix_low_fov_scene = 0;
                     (*p_env).disable_fog = 0;
                     (*p_env).hide_quest_banner = 0;
                     (*p_env).remove_open_team_progress = 0;
@@ -883,12 +883,12 @@ fn main() {
         fov: field_of_view,
         fps: target_fps,
         disable_fog: get_bool_input("Disable fog rendering?", false),
-        fix_low_fov: get_bool_input("Fix low FOV scenes (fov <= 30)?", true),
+        fix_low_fov: get_bool_input("Fix low FOV scenes (fov <= 30)?", false),
         hide_banner: get_bool_input("Hide quest banner?", false),
-        remove_team_anim: get_bool_input("Remove team open animation?", false),
+        remove_team_anim: get_bool_input("Remove team open animation?", true),
         disable_event_camera: get_bool_input("Disable event camera movement?", false),
         hide_damage: get_bool_input("Hide damage numbers?", false),
-        redirect_craft: get_bool_input("Redirect crafting table?", false),
+        redirect_craft: get_bool_input("Redirect crafting table?", true),
     };
 
     // Check if DLL exists
