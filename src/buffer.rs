@@ -1,9 +1,8 @@
 //! Memory buffer management for MinHook-rs
 //!
-//! This module handles allocation of executable memory blocks near the target functions.
-//! In x64 mode, memory must be allocated within ±2GB range for relative jumps to work.
+//! This module provides memory allocation and management functionality
+//! for trampoline functions. Direct port of buffer.c.
 
-use crate::error::{HookError, Result};
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::Mutex;
@@ -13,20 +12,20 @@ use windows_sys::Win32::System::SystemInformation::*;
 #[cfg(not(target_arch = "x86_64"))]
 compile_error!("Buffer module only supports x86_64 architecture");
 
-/// Size of each memory block (4KB = page size of VirtualAlloc)
-const MEMORY_BLOCK_SIZE: usize = 0x1000;
-
-/// Max range for seeking a memory block (±1GB, actual range is ±2GB for relative jumps)
-const MAX_MEMORY_RANGE: usize = 0x40000000;
-
 /// Size of each memory slot
 pub const MEMORY_SLOT_SIZE: usize = 64;
+
+/// Size of each memory block (page size of VirtualAlloc)
+const MEMORY_BLOCK_SIZE: usize = 0x1000;
+
+/// Max range for seeking a memory block (1024MB)
+const MAX_MEMORY_RANGE: usize = 0x40000000;
 
 /// Memory protection flags to check the executable address
 const PAGE_EXECUTE_FLAGS: u32 =
     PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
 
-/// Memory slot - exact port of C union
+/// Memory slot
 #[repr(C)]
 union MemorySlot {
     /// Pointer to next free slot
@@ -35,22 +34,16 @@ union MemorySlot {
     buffer: [u8; MEMORY_SLOT_SIZE],
 }
 
-/// Memory block info - exact port of C struct
-/// Placed at the head of each block
+/// Memory block info
 #[repr(C)]
 struct MemoryBlock {
     /// Pointer to next block
     next: *mut MemoryBlock,
     /// First element of the free slot list
-    free_list: *mut MemorySlot,
+    free: *mut MemorySlot,
     /// Number of used slots
     used_count: u32,
 }
-
-unsafe impl Send for MemoryBlock {}
-unsafe impl Sync for MemoryBlock {}
-unsafe impl Send for MemorySlot {}
-unsafe impl Sync for MemorySlot {}
 
 /// Global memory buffer manager
 struct BufferManager {
@@ -68,106 +61,18 @@ impl BufferManager {
         }
     }
 
-    /// Initialize buffer manager - port of InitializeBuffer
-    fn initialize(&mut self) {
-        // Nothing to do for now
-    }
-
-    /// Cleanup all allocated blocks - port of UninitializeBuffer
-    fn uninitialize(&mut self) {
+    /// Get memory block
+    fn get_memory_block(&mut self, origin: *mut c_void) -> *mut MemoryBlock {
         let mut block = self.blocks;
-        self.blocks = ptr::null_mut();
-
-        while !block.is_null() {
-            unsafe {
-                let next = (*block).next;
-                VirtualFree(block as *mut c_void, 0, MEM_RELEASE);
-                block = next;
-            }
-        }
-    }
-
-    /// Allocate a buffer near the origin address - port of AllocateBuffer
-    fn allocate(&mut self, origin: *mut c_void) -> Result<*mut c_void> {
-        let block = self.get_memory_block(origin)?;
-        if block.is_null() {
-            return Err(HookError::MemoryAlloc);
-        }
 
         unsafe {
-            // Remove an unused slot from the list
-            let slot = (*block).free_list;
-            (*block).free_list = (*slot).next;
-            (*block).used_count += 1;
-
-            #[cfg(debug_assertions)]
-            {
-                // Fill the slot with INT3 for debugging
-                ptr::write_bytes(slot as *mut u8, 0xCC, MEMORY_SLOT_SIZE);
-            }
-
-            Ok(slot as *mut c_void)
-        }
-    }
-
-    /// Free an allocated buffer - port of FreeBuffer
-    fn free(&mut self, buffer: *mut c_void) {
-        if buffer.is_null() {
-            return;
-        }
-
-        let mut block = self.blocks;
-        let mut prev: *mut MemoryBlock = ptr::null_mut();
-        let target_block = ((buffer as usize) / MEMORY_BLOCK_SIZE) * MEMORY_BLOCK_SIZE;
-
-        while !block.is_null() {
-            if (block as usize) == target_block {
-                unsafe {
-                    let slot = buffer as *mut MemorySlot;
-
-                    #[cfg(debug_assertions)]
-                    {
-                        // Clear the released slot for debugging
-                        ptr::write_bytes(slot as *mut u8, 0x00, MEMORY_SLOT_SIZE);
-                    }
-
-                    // Restore the released slot to the list
-                    (*slot).next = (*block).free_list;
-                    (*block).free_list = slot;
-                    (*block).used_count -= 1;
-
-                    // Free if unused
-                    if (*block).used_count == 0 {
-                        if !prev.is_null() {
-                            (*prev).next = (*block).next;
-                        } else {
-                            self.blocks = (*block).next;
-                        }
-
-                        VirtualFree(block as *mut c_void, 0, MEM_RELEASE);
-                    }
-                }
-                break;
-            }
-
-            unsafe {
-                prev = block;
-                block = (*block).next;
-            }
-        }
-    }
-
-    /// Get or create a memory block near the origin - port of GetMemoryBlock
-    fn get_memory_block(&mut self, origin: *mut c_void) -> Result<*mut MemoryBlock> {
-        // Calculate address range for x64
-        let (min_addr, max_addr) = unsafe {
-            let mut si: SYSTEM_INFO = std::mem::zeroed();
+            let mut si = std::mem::zeroed::<SYSTEM_INFO>();
             GetSystemInfo(&mut si);
 
             let mut min_addr = si.lpMinimumApplicationAddress as usize;
             let mut max_addr = si.lpMaximumApplicationAddress as usize;
 
-            // origin ± 512MB (C comment says 512MB but MAX_MEMORY_RANGE is 1GB)
+            // origin ± 512MB
             if (origin as usize) > MAX_MEMORY_RANGE
                 && min_addr < (origin as usize) - MAX_MEMORY_RANGE
             {
@@ -181,60 +86,36 @@ impl BufferManager {
             // Make room for MEMORY_BLOCK_SIZE bytes
             max_addr -= MEMORY_BLOCK_SIZE - 1;
 
-            (min_addr, max_addr)
-        };
-
-        // Look the registered blocks for a reachable one
-        let mut block = self.blocks;
-        while !block.is_null() {
-            let block_addr = block as usize;
-
-            // Ignore the blocks too far
-            if block_addr >= min_addr && block_addr < max_addr {
-                unsafe {
-                    // The block has at least one unused slot
-                    if !(*block).free_list.is_null() {
-                        return Ok(block);
-                    }
+            // Look for registered blocks for a reachable one
+            while !block.is_null() {
+                // Ignore blocks too far
+                if (block as usize) < min_addr || (block as usize) >= max_addr {
+                    block = (*block).next;
+                    continue;
                 }
-            }
 
-            unsafe {
+                // The block has at least one unused slot
+                if !(*block).free.is_null() {
+                    return block;
+                }
+
                 block = (*block).next;
             }
-        }
-
-        // Need to allocate a new block
-        self.allocate_new_block(origin, min_addr, max_addr)
-    }
-
-    /// Allocate a new memory block
-    fn allocate_new_block(
-        &mut self,
-        origin: *mut c_void,
-        min_addr: usize,
-        max_addr: usize,
-    ) -> Result<*mut MemoryBlock> {
-        unsafe {
-            let mut si: SYSTEM_INFO = std::mem::zeroed();
-            GetSystemInfo(&mut si);
-
-            let mut block: *mut MemoryBlock = ptr::null_mut();
 
             // Alloc a new block above if not found
-            let mut alloc_addr = origin;
-            while (alloc_addr as usize) >= min_addr {
-                alloc_addr = find_prev_free_region(
-                    alloc_addr,
+            let mut alloc = origin;
+            while (alloc as usize) >= min_addr {
+                alloc = find_prev_free_region(
+                    alloc,
                     min_addr as *mut c_void,
                     si.dwAllocationGranularity,
                 );
-                if alloc_addr.is_null() {
+                if alloc.is_null() {
                     break;
                 }
 
                 block = VirtualAlloc(
-                    alloc_addr,
+                    alloc,
                     MEMORY_BLOCK_SIZE,
                     MEM_COMMIT | MEM_RESERVE,
                     PAGE_EXECUTE_READWRITE,
@@ -247,19 +128,19 @@ impl BufferManager {
 
             // Alloc a new block below if not found
             if block.is_null() {
-                let mut alloc_addr = origin;
-                while (alloc_addr as usize) <= max_addr {
-                    alloc_addr = find_next_free_region(
-                        alloc_addr,
+                let mut alloc = origin;
+                while (alloc as usize) <= max_addr {
+                    alloc = find_next_free_region(
+                        alloc,
                         max_addr as *mut c_void,
                         si.dwAllocationGranularity,
                     );
-                    if alloc_addr.is_null() {
+                    if alloc.is_null() {
                         break;
                     }
 
                     block = VirtualAlloc(
-                        alloc_addr,
+                        alloc,
                         MEMORY_BLOCK_SIZE,
                         MEM_COMMIT | MEM_RESERVE,
                         PAGE_EXECUTE_READWRITE,
@@ -272,46 +153,127 @@ impl BufferManager {
             }
 
             if !block.is_null() {
-                self.initialize_block(block);
-                Ok(block)
-            } else {
-                Err(HookError::MemoryAlloc)
+                // Build a linked list of all the slots
+                let mut slot =
+                    (block as *mut u8).add(std::mem::size_of::<MemoryBlock>()) as *mut MemorySlot;
+                (*block).free = ptr::null_mut();
+                (*block).used_count = 0;
+
+                while (slot as usize) - (block as usize) <= MEMORY_BLOCK_SIZE - MEMORY_SLOT_SIZE {
+                    (*slot).next = (*block).free;
+                    (*block).free = slot;
+                    slot = slot.add(1);
+                }
+
+                (*block).next = self.blocks;
+                self.blocks = block;
+            }
+
+            block
+        }
+    }
+
+    /// Allocate a buffer
+    fn allocate_buffer(
+        &mut self,
+        origin: *mut c_void,
+    ) -> Result<*mut c_void, crate::error::HookError> {
+        let block = self.get_memory_block(origin);
+        if block.is_null() {
+            return Err(crate::error::HookError::MemoryAlloc);
+        }
+
+        unsafe {
+            // Remove an unused slot from the list
+            let slot = (*block).free;
+            (*block).free = (*slot).next;
+            (*block).used_count += 1;
+
+            #[cfg(debug_assertions)]
+            {
+                // Fill the slot with INT3 for debugging
+                ptr::write_bytes(slot as *mut u8, 0xCC, MEMORY_SLOT_SIZE);
+            }
+
+            Ok(slot as *mut c_void)
+        }
+    }
+
+    /// Free a buffer
+    fn free_buffer(&mut self, buffer: *mut c_void) {
+        if buffer.is_null() {
+            return;
+        }
+
+        unsafe {
+            let mut block = self.blocks;
+            let mut prev: *mut MemoryBlock = ptr::null_mut();
+            let target_block = ((buffer as usize) / MEMORY_BLOCK_SIZE) * MEMORY_BLOCK_SIZE;
+
+            while !block.is_null() {
+                if (block as usize) == target_block {
+                    let slot = buffer as *mut MemorySlot;
+
+                    #[cfg(debug_assertions)]
+                    {
+                        // Clear the released slot for debugging
+                        ptr::write_bytes(slot as *mut u8, 0x00, MEMORY_SLOT_SIZE);
+                    }
+
+                    // Restore the released slot to the list
+                    (*slot).next = (*block).free;
+                    (*block).free = slot;
+                    (*block).used_count -= 1;
+
+                    // Free if unused
+                    if (*block).used_count == 0 {
+                        if !prev.is_null() {
+                            (*prev).next = (*block).next;
+                        } else {
+                            self.blocks = (*block).next;
+                        }
+
+                        VirtualFree(block as *mut c_void, 0, MEM_RELEASE);
+                    }
+
+                    break;
+                }
+
+                prev = block;
+                block = (*block).next;
             }
         }
     }
 
-    /// Initialize a newly allocated block - exact port of C logic
-    fn initialize_block(&mut self, block: *mut MemoryBlock) {
-        unsafe {
-            // Build a linked list of all the slots
-            // PMEMORY_SLOT pSlot = (PMEMORY_SLOT)pBlock + 1;
-            let mut slot = block.add(1) as *mut MemorySlot;
+    /// Uninitialize the buffer system
+    fn uninitialize(&mut self) {
+        let mut block = self.blocks;
+        self.blocks = ptr::null_mut();
 
-            (*block).free_list = ptr::null_mut();
-            (*block).used_count = 0;
-
-            // C code: do { ... } while ((ULONG_PTR)pSlot - (ULONG_PTR)pBlock <= MEMORY_BLOCK_SIZE - MEMORY_SLOT_SIZE);
-            loop {
-                (*slot).next = (*block).free_list;
-                (*block).free_list = slot;
-                slot = slot.add(1);
-
-                // Check loop condition
-                if (slot as usize) - (block as usize) > MEMORY_BLOCK_SIZE - MEMORY_SLOT_SIZE {
-                    break;
-                }
+        while !block.is_null() {
+            unsafe {
+                let next = (*block).next;
+                VirtualFree(block as *mut c_void, 0, MEM_RELEASE);
+                block = next;
             }
-
-            (*block).next = self.blocks;
-            self.blocks = block;
         }
     }
 }
 
-/// Global buffer manager instance
+/// Global memory buffer manager
 static BUFFER_MANAGER: Mutex<BufferManager> = Mutex::new(BufferManager::new());
 
-/// Find previous free region - exact port of FindPrevFreeRegion
+/// Initialize the buffer system
+pub fn initialize_buffer() {
+    // Nothing to do for now
+}
+
+/// Uninitialize the buffer system
+pub fn uninitialize_buffer() {
+    BUFFER_MANAGER.lock().unwrap().uninitialize();
+}
+
+/// Find previous free region
 fn find_prev_free_region(
     address: *mut c_void,
     min_addr: *mut c_void,
@@ -323,15 +285,15 @@ fn find_prev_free_region(
     try_addr -= try_addr % allocation_granularity as usize;
 
     // Start from the previous allocation granularity multiply
-    try_addr = try_addr.saturating_sub(allocation_granularity as usize);
+    try_addr -= allocation_granularity as usize;
 
-    while try_addr >= (min_addr as usize) {
+    while try_addr >= min_addr as usize {
         unsafe {
-            let mut mbi: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
+            let mut mbi = std::mem::zeroed::<MEMORY_BASIC_INFORMATION>();
             if VirtualQuery(
                 try_addr as *const c_void,
                 &mut mbi,
-                size_of::<MEMORY_BASIC_INFORMATION>(),
+                std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
             ) == 0
             {
                 break;
@@ -345,15 +307,14 @@ fn find_prev_free_region(
                 break;
             }
 
-            try_addr =
-                (mbi.AllocationBase as usize).saturating_sub(allocation_granularity as usize);
+            try_addr = mbi.AllocationBase as usize - allocation_granularity as usize;
         }
     }
 
     ptr::null_mut()
 }
 
-/// Find next free region - exact port of FindNextFreeRegion
+/// Find next free region
 fn find_next_free_region(
     address: *mut c_void,
     max_addr: *mut c_void,
@@ -367,13 +328,13 @@ fn find_next_free_region(
     // Start from the next allocation granularity multiply
     try_addr += allocation_granularity as usize;
 
-    while try_addr <= (max_addr as usize) {
+    while try_addr <= max_addr as usize {
         unsafe {
-            let mut mbi: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
+            let mut mbi = std::mem::zeroed::<MEMORY_BASIC_INFORMATION>();
             if VirtualQuery(
                 try_addr as *const c_void,
                 &mut mbi,
-                size_of::<MEMORY_BASIC_INFORMATION>(),
+                std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
             ) == 0
             {
                 break;
@@ -394,43 +355,29 @@ fn find_next_free_region(
     ptr::null_mut()
 }
 
-/// Initialize the buffer system - port of InitializeBuffer
-pub fn initialize_buffer() {
-    if let Ok(mut manager) = BUFFER_MANAGER.lock() {
-        manager.initialize();
-    }
+/// Allocate a buffer
+pub fn allocate_buffer(origin: *mut c_void) -> Result<*mut c_void, crate::error::HookError> {
+    BUFFER_MANAGER.lock().unwrap().allocate_buffer(origin)
 }
 
-/// Uninitialize the buffer system - port of UninitializeBuffer
-pub fn uninitialize_buffer() {
-    if let Ok(mut manager) = BUFFER_MANAGER.lock() {
-        manager.uninitialize();
-    }
-}
-
-/// Allocate executable memory near the origin - port of AllocateBuffer
-pub fn allocate_buffer(origin: *mut c_void) -> Result<*mut c_void> {
-    BUFFER_MANAGER
-        .lock()
-        .map_err(|_| HookError::MemoryAlloc)?
-        .allocate(origin)
-}
-
-/// Free allocated buffer - port of FreeBuffer
+/// Free a buffer
 pub fn free_buffer(buffer: *mut c_void) {
-    if let Ok(mut manager) = BUFFER_MANAGER.lock() {
-        manager.free(buffer);
-    }
+    BUFFER_MANAGER.lock().unwrap().free_buffer(buffer);
 }
 
-/// Check if address is executable - port of IsExecutableAddress
+/// Check if address is executable
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn is_executable_address(address: *mut c_void) -> bool {
+    if address.is_null() {
+        return false;
+    }
+
     unsafe {
-        let mut mi: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
+        let mut mi = std::mem::zeroed::<MEMORY_BASIC_INFORMATION>();
         VirtualQuery(
-            address as *const c_void,
+            address,
             &mut mi,
-            size_of::<MEMORY_BASIC_INFORMATION>(),
+            std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
         );
 
         mi.State == MEM_COMMIT && (mi.Protect & PAGE_EXECUTE_FLAGS) != 0

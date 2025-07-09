@@ -1,34 +1,15 @@
-//! Precise x86_64 instruction decoder - direct port of HDE64 with goto elimination
-//! Based on hde64.c, maintaining exact compatibility while removing goto statements
+//! x86_64 instruction decoder
 
-/// HDE64-compatible instruction structure
+/// Simplified instruction structure for trampoline generation
 #[derive(Debug, Clone, Default)]
 pub struct HookInstruction {
     pub len: u8,
-    pub p_rep: u8,
-    pub p_lock: u8,
-    pub p_seg: u8,
-    pub p_66: u8,
-    pub p_67: u8,
-    pub rex: u8,
-    pub rex_w: u8,
-    pub rex_r: u8,
-    pub rex_x: u8,
-    pub rex_b: u8,
     pub opcode: u8,
     pub opcode2: u8,
     pub modrm: u8,
-    pub modrm_mod: u8,
-    pub modrm_reg: u8,
-    pub modrm_rm: u8,
-    pub sib: u8,
-    pub sib_scale: u8,
-    pub sib_index: u8,
-    pub sib_base: u8,
-    pub immediate: i32,    // Unified immediate field
-    pub displacement: i32, // Unified displacement field
-    pub flags: u32,
-    pub error: bool,
+    pub immediate: i32,
+    pub immediate_size: u8,
+    pub displacement: i32,
 }
 
 impl HookInstruction {
@@ -38,52 +19,42 @@ impl HookInstruction {
     }
 
     #[inline]
-    pub fn immediate_size(&self) -> u8 {
-        let mut size = 0u8;
-        if (self.flags & F_IMM8) != 0 {
-            size += 1;
+    pub fn modrm_reg(&self) -> u8 {
+        (self.modrm & 0x38) >> 3
+    }
+
+    #[inline]
+    pub fn modrm_rm(&self) -> u8 {
+        self.modrm & 0x07
+    }
+
+    #[inline]
+    pub fn modrm_mod(&self) -> u8 {
+        self.modrm >> 6
+    }
+
+    #[inline]
+    pub fn is_conditional_jump(&self) -> bool {
+        // Short conditional jumps (70-7F)
+        if (self.opcode & 0xF0) == 0x70 {
+            return true;
         }
-        if (self.flags & F_IMM16) != 0 {
-            size += 2;
+
+        // LOOP instructions (E0-E3)
+        if (self.opcode & 0xFC) == 0xE0 {
+            return true;
         }
-        if (self.flags & F_IMM32) != 0 {
-            size += 4;
+
+        // Long conditional jumps (0F 80-8F)
+        if self.opcode == 0x0F && (self.opcode2 & 0xF0) == 0x80 {
+            return true;
         }
-        if (self.flags & F_IMM64) != 0 {
-            size += 8;
-        }
-        size
+
+        false
     }
 }
 
-// HDE64 flag constants
-pub const F_MODRM: u32 = 0x00000001;
-pub const F_SIB: u32 = 0x00000002;
-pub const F_IMM8: u32 = 0x00000004;
-pub const F_IMM16: u32 = 0x00000008;
-pub const F_IMM32: u32 = 0x00000010;
-pub const F_IMM64: u32 = 0x00000020;
-pub const F_DISP8: u32 = 0x00000040;
-pub const F_DISP16: u32 = 0x00000080;
-pub const F_DISP32: u32 = 0x00000100;
-pub const F_RELATIVE: u32 = 0x00000200;
-pub const F_ERROR: u32 = 0x00001000;
-pub const F_ERROR_OPCODE: u32 = 0x00002000;
-pub const F_ERROR_LENGTH: u32 = 0x00004000;
-pub const F_ERROR_LOCK: u32 = 0x00008000;
-pub const F_ERROR_OPERAND: u32 = 0x00010000;
-pub const F_PREFIX_REPNZ: u32 = 0x01000000;
-pub const F_PREFIX_REPX: u32 = 0x02000000;
-pub const F_PREFIX_REP: u32 = 0x03000000;
-pub const F_PREFIX_66: u32 = 0x04000000;
-pub const F_PREFIX_67: u32 = 0x08000000;
-pub const F_PREFIX_LOCK: u32 = 0x10000000;
-pub const F_PREFIX_SEG: u32 = 0x20000000;
-pub const F_PREFIX_REX: u32 = 0x40000000;
-pub const F_PREFIX_ANY: u32 = 0x7f000000;
-
 // Table constants
-const C_NONE: u8 = 0x00;
 const C_MODRM: u8 = 0x01;
 const C_IMM8: u8 = 0x02;
 const C_IMM16: u8 = 0x04;
@@ -91,9 +62,7 @@ const C_IMM_P66: u8 = 0x10;
 const C_REL8: u8 = 0x20;
 const C_REL32: u8 = 0x40;
 const C_GROUP: u8 = 0x80;
-const C_ERROR: u8 = 0xff;
 
-const PRE_ANY: u8 = 0x00;
 const PRE_NONE: u8 = 0x01;
 const PRE_F2: u8 = 0x02;
 const PRE_F3: u8 = 0x04;
@@ -101,18 +70,9 @@ const PRE_66: u8 = 0x08;
 const PRE_67: u8 = 0x10;
 const PRE_LOCK: u8 = 0x20;
 const PRE_SEG: u8 = 0x40;
-const PRE_ALL: u8 = 0xff;
 
 const DELTA_OPCODES: usize = 0x4a;
-const DELTA_FPU_REG: usize = 0xfd;
-const DELTA_FPU_MODRM: usize = 0x104;
-const DELTA_PREFIXES: usize = 0x13c;
-const DELTA_OP_LOCK_OK: usize = 0x1ae;
-const DELTA_OP2_LOCK_OK: usize = 0x1c6;
-const DELTA_OP_ONLY_MEM: usize = 0x1d8;
-const DELTA_OP2_ONLY_MEM: usize = 0x1e7;
 
-// Complete HDE64 table
 static HDE64_TABLE: &[u8] = &[
     0xa5, 0xaa, 0xa5, 0xb8, 0xa5, 0xaa, 0xa5, 0xaa, 0xa5, 0xb8, 0xa5, 0xb8, 0xa5, 0xb8, 0xa5, 0xb8,
     0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xac, 0xc0, 0xcc, 0xc0, 0xa1, 0xa1, 0xa1, 0xa1,
@@ -150,113 +110,79 @@ static HDE64_TABLE: &[u8] = &[
     0x00,
 ];
 
-/// Main disassembly function
 pub fn decode_instruction(code: &[u8]) -> HookInstruction {
     let mut hs = HookInstruction::default();
-
-    if code.is_empty() {
-        hs.error = true;
-        hs.flags = F_ERROR | F_ERROR_LENGTH;
-        return hs;
-    }
-
     let mut p = 0usize;
     let mut pref = 0u8;
     let mut op64 = 0u8;
 
-    // Prefix parsing loop
+    if code.is_empty() {
+        return hs;
+    }
+
+    // Parse prefixes
     for _ in 0..16 {
         if p >= code.len() {
             break;
         }
 
-        let c = code[p];
-        p += 1;
-
-        match c {
-            0xf3 => {
-                hs.p_rep = c;
-                pref |= PRE_F3;
-            }
-            0xf2 => {
-                hs.p_rep = c;
-                pref |= PRE_F2;
+        match code[p] {
+            0xf3 | 0xf2 => {
+                p += 1;
+                pref |= if code[p - 1] == 0xf3 { PRE_F3 } else { PRE_F2 };
             }
             0xf0 => {
-                hs.p_lock = c;
+                p += 1;
                 pref |= PRE_LOCK;
             }
             0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65 => {
-                hs.p_seg = c;
+                p += 1;
                 pref |= PRE_SEG;
             }
             0x66 => {
-                hs.p_66 = c;
+                p += 1;
                 pref |= PRE_66;
             }
             0x67 => {
-                hs.p_67 = c;
+                p += 1;
                 pref |= PRE_67;
             }
-            _ => {
-                p -= 1; // Back up one position
-                break; // Exit prefix loop
-            }
+            _ => break,
         }
     }
-    // pref_done equivalent
-
-    hs.flags = (pref as u32) << 23;
 
     if pref == 0 {
         pref |= PRE_NONE;
     }
 
     if p >= code.len() {
-        hs.error = true;
-        hs.flags = F_ERROR | F_ERROR_LENGTH;
         return hs;
     }
 
     let mut c = code[p];
     p += 1;
 
-    // REX prefix handling for x64
+    // REX prefix
     if (c & 0xf0) == 0x40 {
-        hs.flags |= F_PREFIX_REX;
-        hs.rex_w = (c & 0xf) >> 3;
-        if hs.rex_w != 0 && p < code.len() && (code[p] & 0xf8) == 0xb8 {
+        let rex_w = (c & 0xf) >> 3;
+        if rex_w != 0 && p < code.len() && (code[p] & 0xf8) == 0xb8 {
             op64 += 1;
         }
-        hs.rex_r = (c & 7) >> 2;
-        hs.rex_x = (c & 3) >> 1;
-        hs.rex_b = c & 1;
 
         if p >= code.len() {
-            hs.error = true;
-            hs.flags = F_ERROR | F_ERROR_LENGTH;
             return hs;
         }
 
         c = code[p];
         p += 1;
-
-        // Error check
-        if (c & 0xf0) == 0x40 {
-            hs.flags |= F_ERROR | F_ERROR_OPCODE;
-            hs.len = 15;
-            return hs; // Direct return instead of goto
-        }
     }
 
     hs.opcode = c;
-    let mut ht = 0usize; // Table offset
+    let mut ht = 0usize;
 
-    // Two-byte opcode handling
+    // Two-byte opcode
     if c == 0x0f {
         if p >= code.len() {
-            hs.error = true;
-            hs.flags = F_ERROR | F_ERROR_LENGTH;
             return hs;
         }
         hs.opcode2 = code[p];
@@ -275,275 +201,66 @@ pub fn decode_instruction(code: &[u8]) -> HookInstruction {
     let opcode = c;
     let mut cflags = get_table_entry(ht, opcode);
 
-    // Error handling
-    if cflags == C_ERROR {
-        hs.flags |= F_ERROR | F_ERROR_OPCODE;
-        if (opcode & !3) == 0x24 {
-            cflags = 1; // Special case from original
-        } else {
-            cflags = 0;
-        }
-    }
-
-    let mut x = 0u8;
     if (cflags & C_GROUP) != 0 {
         let group_offset = ht + (cflags & 0x7f) as usize;
         if group_offset + 1 < HDE64_TABLE.len() {
             let t = u16::from_le_bytes([HDE64_TABLE[group_offset], HDE64_TABLE[group_offset + 1]]);
             cflags = (t & 0xff) as u8;
-            x = (t >> 8) as u8;
-        }
-    }
-
-    // Prefix validation for two-byte opcodes
-    if hs.opcode2 != 0 {
-        let prefix_ht = DELTA_PREFIXES;
-        let prefix_flags = get_table_entry(prefix_ht, opcode);
-        if (prefix_flags & pref) != 0 {
-            hs.flags |= F_ERROR | F_ERROR_OPCODE;
         }
     }
 
     // ModR/M processing
     if (cflags & C_MODRM) != 0 {
         if p >= code.len() {
-            hs.error = true;
-            hs.flags = F_ERROR | F_ERROR_LENGTH;
             return hs;
         }
 
-        hs.flags |= F_MODRM;
         c = code[p];
         p += 1;
         hs.modrm = c;
-        hs.modrm_mod = c >> 6;
-        hs.modrm_rm = c & 7;
-        hs.modrm_reg = (c & 0x3f) >> 3;
 
-        // Group instruction validation
-        if x != 0 && ((x << hs.modrm_reg) & 0x80) != 0 {
-            hs.flags |= F_ERROR | F_ERROR_OPCODE;
-        }
-
-        // FPU instruction handling
-        if hs.opcode2 == 0 && (0xd9..=0xdf).contains(&opcode) {
-            let t_base = opcode - 0xd9;
-            let fpu_result = if hs.modrm_mod == 3 {
-                let fpu_ht = DELTA_FPU_MODRM + (t_base as usize) * 8;
-                if fpu_ht + (hs.modrm_reg as usize) < HDE64_TABLE.len() {
-                    HDE64_TABLE[fpu_ht + (hs.modrm_reg as usize)] << hs.modrm_rm
-                } else {
-                    0x80
-                }
-            } else {
-                let fpu_ht = DELTA_FPU_REG;
-                if fpu_ht + (t_base as usize) < HDE64_TABLE.len() {
-                    HDE64_TABLE[fpu_ht + (t_base as usize)] << hs.modrm_reg
-                } else {
-                    0x80
-                }
-            };
-
-            if (fpu_result & 0x80) != 0 {
-                hs.flags |= F_ERROR | F_ERROR_OPCODE;
-            }
-        }
-
-        // LOCK prefix validation
-        if (pref & PRE_LOCK) != 0 {
-            if hs.modrm_mod == 3 {
-                hs.flags |= F_ERROR | F_ERROR_LOCK;
-            } else {
-                let lock_valid = validate_lock_prefix(hs.opcode2 != 0, opcode, hs.modrm_reg);
-                if !lock_valid {
-                    hs.flags |= F_ERROR | F_ERROR_LOCK;
-                }
-            }
-        }
-
-        // Special operand validation
-        let operand_error =
-            check_operand_errors(hs.opcode2 != 0, opcode, hs.modrm_mod, hs.modrm_reg, pref);
-        if operand_error {
-            hs.flags |= F_ERROR | F_ERROR_OPERAND;
-        }
+        let modrm_mod = c >> 6;
+        let modrm_rm = c & 7;
+        let modrm_reg = (c & 0x38) >> 3;
 
         // SIB and displacement processing
-        let (sib_bytes, disp_size) =
-            process_addressing_mode(code, p, hs.modrm_mod, hs.modrm_rm, pref);
-
-        if sib_bytes == u8::MAX {
-            hs.error = true;
-            hs.flags = F_ERROR | F_ERROR_LENGTH;
-            return hs;
-        }
-
-        // SIB byte processing
-        if sib_bytes > 0 {
-            hs.flags |= F_SIB;
-            hs.sib = code[p];
-            hs.sib_scale = code[p] >> 6;
-            hs.sib_index = (code[p] & 0x3f) >> 3;
-            hs.sib_base = code[p] & 7;
-        }
+        let (sib_bytes, disp_size) = process_addressing_mode(code, p, modrm_mod, modrm_rm, pref);
         p += sib_bytes as usize;
-
-        // Displacement processing
         p += process_displacement(code, p, disp_size, &mut hs);
 
-        // Additional immediate processing for F6/F7 instructions
-        if hs.modrm_reg <= 1 {
+        // Additional immediate for F6/F7 instructions
+        if modrm_reg <= 1 {
             if opcode == 0xf6 {
                 cflags |= C_IMM8;
             } else if opcode == 0xf7 {
                 cflags |= C_IMM_P66;
             }
         }
-    } else if (pref & PRE_LOCK) != 0 {
-        hs.flags |= F_ERROR | F_ERROR_LOCK;
     }
 
-    // Immediate value processing
+    // Process immediate values
     process_immediate_values(code, &mut p, &mut hs, cflags, pref, op64);
 
-    // Final length calculation
-    hs.len = p as u8;
-    if hs.len > 15 {
-        hs.flags |= F_ERROR | F_ERROR_LENGTH;
-        hs.len = 15;
-    }
-
+    hs.len = p.min(15) as u8;
     hs
 }
 
-/// Table lookup helper
 fn get_table_entry(ht_offset: usize, opcode: u8) -> u8 {
-    if ht_offset + (opcode / 4) as usize >= HDE64_TABLE.len() {
-        return C_ERROR;
+    let table_idx_offset = ht_offset + (opcode / 4) as usize;
+    if table_idx_offset >= HDE64_TABLE.len() {
+        return 0;
     }
 
-    let table_idx = HDE64_TABLE[ht_offset + (opcode / 4) as usize];
+    let table_idx = HDE64_TABLE[table_idx_offset];
     let final_idx = ht_offset + table_idx as usize + (opcode % 4) as usize;
 
     if final_idx >= HDE64_TABLE.len() {
-        return C_ERROR;
+        return 0;
     }
 
     HDE64_TABLE[final_idx]
 }
 
-/// LOCK prefix validation
-fn validate_lock_prefix(is_two_byte: bool, opcode: u8, modrm_reg: u8) -> bool {
-    let (table_start, table_end) = if is_two_byte {
-        (DELTA_OP2_LOCK_OK, DELTA_OP_ONLY_MEM)
-    } else {
-        (DELTA_OP_LOCK_OK, DELTA_OP2_LOCK_OK)
-    };
-
-    let search_opcode = if !is_two_byte { opcode & !2 } else { opcode };
-
-    let mut i = table_start;
-    while i < table_end && i + 1 < HDE64_TABLE.len() {
-        if HDE64_TABLE[i] == search_opcode {
-            let reg_mask = HDE64_TABLE[i + 1];
-            return ((reg_mask << modrm_reg) & 0x80) == 0;
-        }
-        i += 2;
-    }
-    false
-}
-
-/// Operand error checking
-fn check_operand_errors(
-    is_two_byte: bool,
-    opcode: u8,
-    modrm_mod: u8,
-    modrm_reg: u8,
-    pref: u8,
-) -> bool {
-    if is_two_byte {
-        match opcode {
-            0x20 | 0x22 => {
-                return modrm_mod != 3 || modrm_reg > 4 || modrm_reg == 1;
-            }
-            0x21 | 0x23 => {
-                return modrm_mod != 3 || modrm_reg == 4 || modrm_reg == 5;
-            }
-            _ => {}
-        }
-
-        if modrm_mod != 3 {
-            match opcode {
-                0x50 | 0xd7 | 0xf7 => {
-                    return (pref & (PRE_NONE | PRE_66)) != 0;
-                }
-                0xd6 => {
-                    return (pref & (PRE_F2 | PRE_F3)) != 0;
-                }
-                0xc5 => {
-                    return true;
-                }
-                _ => {}
-            }
-        }
-
-        // Memory-only instruction check for two-byte opcodes
-        if modrm_mod == 3 {
-            return check_memory_only_instruction(
-                DELTA_OP2_ONLY_MEM,
-                HDE64_TABLE.len(),
-                opcode,
-                modrm_reg,
-                pref,
-            );
-        }
-    } else {
-        match opcode {
-            0x8c => {
-                return modrm_reg > 5;
-            }
-            0x8e => {
-                return modrm_reg == 1 || modrm_reg > 5;
-            }
-            _ => {}
-        }
-
-        // Memory-only instruction check for one-byte opcodes
-        if modrm_mod == 3 {
-            return check_memory_only_instruction(
-                DELTA_OP_ONLY_MEM,
-                DELTA_OP2_ONLY_MEM,
-                opcode,
-                modrm_reg,
-                pref,
-            );
-        }
-    }
-
-    false
-}
-
-/// Memory-only instruction validation
-fn check_memory_only_instruction(
-    table_start: usize,
-    table_end: usize,
-    opcode: u8,
-    modrm_reg: u8,
-    pref: u8,
-) -> bool {
-    let mut i = table_start;
-    while i + 2 < table_end && i + 2 < HDE64_TABLE.len() {
-        if HDE64_TABLE[i] == opcode {
-            let prefix_mask = HDE64_TABLE[i + 1];
-            let reg_mask = HDE64_TABLE[i + 2];
-            return (prefix_mask & pref) != 0 && ((reg_mask << modrm_reg) & 0x80) == 0;
-        }
-        i += 2;
-    }
-    false
-}
-
-/// SIB and displacement size calculation
 fn process_addressing_mode(
     code: &[u8],
     pos: usize,
@@ -554,7 +271,6 @@ fn process_addressing_mode(
     let mut sib_bytes = 0u8;
     let mut disp_size = 0u8;
 
-    // Calculate displacement size based on addressing mode
     match modrm_mod {
         0 => {
             if (pref & PRE_67) != 0 {
@@ -571,20 +287,14 @@ fn process_addressing_mode(
         2 => {
             disp_size = 2;
             if (pref & PRE_67) == 0 {
-                disp_size <<= 1; // disp_size *= 2
+                disp_size <<= 1;
             }
         }
         _ => {}
     }
 
-    // SIB byte processing
-    if modrm_mod != 3 && modrm_rm == 4 {
-        if pos >= code.len() {
-            return (u8::MAX, 0); // Error condition
-        }
+    if modrm_mod != 3 && modrm_rm == 4 && pos < code.len() {
         sib_bytes = 1;
-
-        // SIB base special case
         let sib = code[pos];
         if (sib & 7) == 5 && (modrm_mod & 1) == 0 {
             disp_size = 4;
@@ -594,29 +304,19 @@ fn process_addressing_mode(
     (sib_bytes, disp_size)
 }
 
-/// Displacement processing
 fn process_displacement(code: &[u8], pos: usize, disp_size: u8, hs: &mut HookInstruction) -> usize {
-    if disp_size == 0 {
-        return 0;
-    }
-
-    if pos + disp_size as usize > code.len() {
-        hs.error = true;
-        hs.flags = F_ERROR | F_ERROR_LENGTH;
+    if disp_size == 0 || pos + disp_size as usize > code.len() {
         return 0;
     }
 
     match disp_size {
         1 => {
-            hs.flags |= F_DISP8;
             hs.displacement = code[pos] as i8 as i32;
         }
         2 => {
-            hs.flags |= F_DISP16;
             hs.displacement = i16::from_le_bytes([code[pos], code[pos + 1]]) as i32;
         }
         4 => {
-            hs.flags |= F_DISP32;
             hs.displacement =
                 i32::from_le_bytes([code[pos], code[pos + 1], code[pos + 2], code[pos + 3]]);
         }
@@ -626,7 +326,24 @@ fn process_displacement(code: &[u8], pos: usize, disp_size: u8, hs: &mut HookIns
     disp_size as usize
 }
 
-/// Immediate value processing - FIXED to handle 16-bit immediates correctly
+fn read_immediate(code: &[u8], pos: &mut usize, hs: &mut HookInstruction, size: u8) -> bool {
+    if *pos + size as usize > code.len() {
+        return false;
+    }
+
+    hs.immediate = match size {
+        1 => code[*pos] as i8 as i32,
+        2 => i16::from_le_bytes([code[*pos], code[*pos + 1]]) as i32,
+        4 => i32::from_le_bytes([code[*pos], code[*pos + 1], code[*pos + 2], code[*pos + 3]]),
+        8 => i32::from_le_bytes([code[*pos], code[*pos + 1], code[*pos + 2], code[*pos + 3]]),
+        _ => 0,
+    };
+
+    hs.immediate_size = size;
+    *pos += size as usize;
+    true
+}
+
 fn process_immediate_values(
     code: &[u8],
     pos: &mut usize,
@@ -635,104 +352,32 @@ fn process_immediate_values(
     pref: u8,
     op64: u8,
 ) {
-    // C_IMM_P66 processing
     if (cflags & C_IMM_P66) != 0 {
         if (cflags & C_REL32) != 0 {
             if (pref & PRE_66) != 0 {
-                // 16-bit relative
-                if read_immediate_16(code, pos, hs) {
-                    hs.flags |= F_IMM16 | F_RELATIVE;
-                }
-                return; // Equivalent to "goto disasm_done"
+                read_immediate(code, pos, hs, 2);
+                return;
             }
-            // Continue to rel32_ok processing below
         } else if op64 != 0 {
-            // 64-bit immediate
-            if read_immediate_64(code, pos, hs) {
-                hs.flags |= F_IMM64;
-            }
+            read_immediate(code, pos, hs, 8);
         } else if (pref & PRE_66) == 0 {
-            // 32-bit immediate
-            if read_immediate_32(code, pos, hs) {
-                hs.flags |= F_IMM32;
-            }
+            read_immediate(code, pos, hs, 4);
         } else {
-            // 16-bit immediate - FIXED: Actually process the 16-bit immediate
-            if read_immediate_16(code, pos, hs) {
-                hs.flags |= F_IMM16;
-            }
+            read_immediate(code, pos, hs, 2);
         }
     }
 
-    // C_IMM16 processing
-    if (cflags & C_IMM16) != 0 && read_immediate_16(code, pos, hs) {
-        hs.flags |= F_IMM16;
+    if (cflags & C_IMM16) != 0 {
+        read_immediate(code, pos, hs, 2);
     }
 
-    // C_IMM8 processing
-    if (cflags & C_IMM8) != 0 && read_immediate_8(code, pos, hs) {
-        hs.flags |= F_IMM8;
+    if (cflags & C_IMM8) != 0 {
+        read_immediate(code, pos, hs, 1);
     }
 
-    // C_REL32 processing
     if (cflags & C_REL32) != 0 {
-        if read_immediate_32(code, pos, hs) {
-            hs.flags |= F_IMM32 | F_RELATIVE;
-        }
-    } else if (cflags & C_REL8) != 0 && read_immediate_8(code, pos, hs) {
-        hs.flags |= F_IMM8 | F_RELATIVE;
+        read_immediate(code, pos, hs, 4);
+    } else if (cflags & C_REL8) != 0 {
+        read_immediate(code, pos, hs, 1);
     }
-}
-
-/// Read 8-bit immediate value
-fn read_immediate_8(code: &[u8], pos: &mut usize, hs: &mut HookInstruction) -> bool {
-    if *pos >= code.len() {
-        hs.error = true;
-        hs.flags |= F_ERROR | F_ERROR_LENGTH;
-        return false;
-    }
-
-    hs.immediate = code[*pos] as i8 as i32;
-    *pos += 1;
-    true
-}
-
-/// Read 16-bit immediate value
-fn read_immediate_16(code: &[u8], pos: &mut usize, hs: &mut HookInstruction) -> bool {
-    if *pos + 2 > code.len() {
-        hs.error = true;
-        hs.flags |= F_ERROR | F_ERROR_LENGTH;
-        return false;
-    }
-
-    hs.immediate = i16::from_le_bytes([code[*pos], code[*pos + 1]]) as i32;
-    *pos += 2;
-    true
-}
-
-/// Read 32-bit immediate value
-fn read_immediate_32(code: &[u8], pos: &mut usize, hs: &mut HookInstruction) -> bool {
-    if *pos + 4 > code.len() {
-        hs.error = true;
-        hs.flags |= F_ERROR | F_ERROR_LENGTH;
-        return false;
-    }
-
-    hs.immediate = i32::from_le_bytes([code[*pos], code[*pos + 1], code[*pos + 2], code[*pos + 3]]);
-    *pos += 4;
-    true
-}
-
-/// Read 64-bit immediate value (only for x64)
-fn read_immediate_64(code: &[u8], pos: &mut usize, hs: &mut HookInstruction) -> bool {
-    if *pos + 8 > code.len() {
-        hs.error = true;
-        hs.flags |= F_ERROR | F_ERROR_LENGTH;
-        return false;
-    }
-
-    // For compatibility, store lower 32 bits in immediate field
-    hs.immediate = i32::from_le_bytes([code[*pos], code[*pos + 1], code[*pos + 2], code[*pos + 3]]);
-    *pos += 8;
-    true
 }

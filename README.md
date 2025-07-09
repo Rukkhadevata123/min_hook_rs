@@ -10,7 +10,7 @@ A Rust implementation of the MinHook library for Windows x64 function hooking.
 
 ```toml
 [dependencies]
-min_hook_rs = "2.0"
+min_hook_rs = "2.1"
 windows-sys = { version = "0.60", features = [
     "Win32_UI_WindowsAndMessaging", 
     "Win32_Foundation"
@@ -290,11 +290,13 @@ remove_hook(target: *mut c_void) -> Result<()>
 enable_hook(target: *mut c_void) -> Result<()>    // Use ALL_HOOKS for all
 disable_hook(target: *mut c_void) -> Result<()>   // Use ALL_HOOKS for all
 
-// Atomic batch operations
+// Queued (deferred) operations
 queue_enable_hook(target: *mut c_void) -> Result<()>
 queue_disable_hook(target: *mut c_void) -> Result<()>
-apply_queued() -> Result<()>
+apply_queued() -> Result<()>   // Apply all queued enable/disable requests in one step
 ```
+
+> **Note:** Queued operations do not take effect until you call `apply_queued()`. This allows you to schedule multiple enable/disable changes and apply them atomically and safely.
 
 ### Instruction Analysis
 

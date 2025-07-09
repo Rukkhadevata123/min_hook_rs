@@ -12,6 +12,7 @@
     "cmake.sourceDirectory": "D:/min_hook_rs/minhook",
     "C_Cpp.default.compilerPath": "cl.exe",
     "files.associations": {
-        "buffer.h": "c"
+        "buffer.h": "c",
+        "vcruntime.h": "c"
     },
 }

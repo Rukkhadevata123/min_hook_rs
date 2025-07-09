@@ -1,294 +1,211 @@
 //! Trampoline function creation for MinHook-rs
-//!
-//! Direct port of trampoline.c for x64, maintaining exact compatibility
 
-use crate::buffer::{allocate_buffer, is_executable_address};
-use crate::disasm::{F_ERROR, decode_instruction};
+use crate::buffer::{MEMORY_SLOT_SIZE, allocate_buffer, is_executable_address};
+use crate::disasm::decode_instruction;
 use crate::error::{HookError, Result};
 use crate::instruction::*;
 use std::ffi::c_void;
+use std::mem;
 use std::ptr;
 
-#[cfg(not(target_arch = "x86_64"))]
-compile_error!("Trampoline module only supports x86_64 architecture");
+/// Maximum size of a trampoline function
+const TRAMPOLINE_MAX_SIZE: usize = MEMORY_SLOT_SIZE - mem::size_of::<JmpAbs>();
 
-/// Maximum size of a trampoline function (64 - sizeof(JMP_ABS))
-const TRAMPOLINE_MAX_SIZE: usize = 64 - size_of::<JmpAbs>();
-
-/// Size of JMP_REL (E9 xxxxxxxx) for minimum hook size
-const JMP_REL_SIZE: usize = 5;
-
-/// Size of short jump (EB xx)  
-const JMP_REL_SHORT_SIZE: usize = 2;
-
-/// Check if memory region contains only padding bytes (like original IsCodePadding)
-fn is_code_padding(inst: &[u8]) -> bool {
-    if inst.is_empty() {
-        return false;
-    }
-
-    let first_byte = inst[0];
-    if first_byte != 0x00 && first_byte != 0x90 && first_byte != 0xCC {
-        return false;
-    }
-
-    inst.iter().all(|&byte| byte == first_byte)
-}
-
-/// Create trampoline function - direct port of CreateTrampolineFunction
-pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
-    // Pre-defined instruction templates (exactly like original)
-    let call_abs = CallAbs {
-        opcode0: 0xFF,
-        opcode1: 0x15,
-        dummy0: 0x00000002, // FF15 00000002: CALL [RIP+8]
-        dummy1: 0xEB,       // EB 08:         JMP +10
-        dummy2: 0x08,
-        address: 0x0000000000000000,
-    };
-
-    let jmp_abs = JmpAbs {
-        opcode0: 0xFF,
-        opcode1: 0x25,
-        dummy: 0x00000000, // FF25 00000000: JMP [RIP+6]
-        address: 0x0000000000000000,
-    };
-
-    let jcc_abs = JccAbs {
-        opcode: 0x70,
-        dummy0: 0x0E, // 7* 0E:         J** +16
-        dummy1: 0xFF, // FF25 00000000: JMP [RIP+6]
-        dummy2: 0x25,
-        dummy3: 0x00000000,
-        address: 0x0000000000000000,
-    };
+/// Create a trampoline function
+pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
+    ct.patch_above = false;
+    ct.n_ip = 0;
+    ct.old_ips.fill(0);
+    ct.new_ips.fill(0);
 
     let mut old_pos = 0u8;
     let mut new_pos = 0u8;
     let mut jmp_dest = 0usize; // Destination address of an internal jump
-    let mut finished = false; // Is the function completed?
-    let mut inst_buf = [0u8; 16]; // Buffer for modified instructions
+    let mut finished = false;
 
-    trampoline.patch_above = false;
-    trampoline.n_ip = 0;
+    // Allocate trampoline buffer
+    ct.trampoline = allocate_buffer(ct.target)?;
 
-    // Main disassembly loop (replaces do-while from C)
     loop {
-        let p_old_inst = trampoline.target as usize + old_pos as usize;
-        let p_new_inst = trampoline.trampoline as usize + new_pos as usize;
+        let old_inst = (ct.target as usize + old_pos as usize) as *const u8;
+        let new_inst = (ct.trampoline as usize + new_pos as usize) as *mut u8;
 
-        // Read and disassemble instruction
-        let code_slice = unsafe { std::slice::from_raw_parts(p_old_inst as *const u8, 16) };
+        // Get instruction bytes for decoding
+        let code_slice =
+            unsafe { std::slice::from_raw_parts(old_inst, 16.min(256 - old_pos as usize)) };
+
         let hs = decode_instruction(code_slice);
-
-        if (hs.flags & F_ERROR) != 0 {
+        if hs.len == 0 {
             return Err(HookError::UnsupportedFunction);
         }
 
-        let mut copy_size = hs.len as usize;
-        let mut copy_src = p_old_inst as *const u8;
+        let mut copy_size = hs.len;
+        let mut temp_buffer = [0u8; 16];
 
-        // Check if we have enough bytes for the hook (like original)
-        if old_pos >= JMP_REL_SIZE as u8 {
-            // The trampoline function is long enough.
-            // Complete the function with the jump to the target function.
-            let mut jmp = jmp_abs;
-            jmp.address = p_old_inst as u64;
-
-            unsafe {
-                ptr::copy_nonoverlapping(
-                    &jmp as *const JmpAbs as *const u8,
-                    inst_buf.as_mut_ptr(),
-                    size_of::<JmpAbs>(),
-                );
-            }
-
-            copy_src = inst_buf.as_ptr();
-            copy_size = size_of::<JmpAbs>();
-            finished = true;
-        }
-        // Instructions using RIP relative addressing (ModR/M = 00???101B)
-        else if (hs.modrm & 0xC7) == 0x05 {
-            // Modify the RIP relative address
-            unsafe {
-                ptr::copy_nonoverlapping(p_old_inst as *const u8, inst_buf.as_mut_ptr(), copy_size);
-            }
-            copy_src = inst_buf.as_ptr();
-
-            // Calculate relative address offset - avoid misaligned pointer dereference
-            let imm_len = ((hs.flags & 0x3C) >> 2) as usize; // Extract immediate length from flags
-            let rel_addr_offset = hs.len as usize - imm_len - 4;
-
-            // Read the current relative address using aligned access
-            let _current_rel_addr = {
-                let bytes = [
-                    inst_buf[rel_addr_offset],
-                    inst_buf[rel_addr_offset + 1],
-                    inst_buf[rel_addr_offset + 2],
-                    inst_buf[rel_addr_offset + 3],
-                ];
-                u32::from_le_bytes(bytes)
+        // Check if we have enough space for the hook
+        if old_pos >= mem::size_of::<JmpRel>() as u8 {
+            // Complete the function with jump to remaining target
+            let jmp = JmpAbs::new(old_inst as u64);
+            let jmp_bytes = unsafe {
+                std::slice::from_raw_parts(&jmp as *const _ as *const u8, mem::size_of::<JmpAbs>())
             };
+            unsafe {
+                ptr::copy_nonoverlapping(jmp_bytes.as_ptr(), new_inst, jmp_bytes.len());
+            }
+            copy_size = mem::size_of::<JmpAbs>() as u8;
+            finished = true;
+        } else if hs.is_rip_relative() {
+            // Handle RIP-relative addressing
+            unsafe {
+                ptr::copy_nonoverlapping(old_inst, temp_buffer.as_mut_ptr(), hs.len as usize);
+            }
 
-            // Calculate new relative address
-            let original_target = p_old_inst + hs.len as usize + hs.displacement as usize;
-            let new_relative =
-                (original_target as i64 - (p_new_inst + hs.len as usize) as i64) as u32;
+            // Calculate new displacement
+            let old_target = old_inst as u64 + hs.len as u64 + hs.displacement as u64;
+            let new_disp = old_target as i64 - (new_inst as u64 + hs.len as u64) as i64;
 
-            // Write the new relative address using aligned access
-            let new_bytes = new_relative.to_le_bytes();
-            inst_buf[rel_addr_offset] = new_bytes[0];
-            inst_buf[rel_addr_offset + 1] = new_bytes[1];
-            inst_buf[rel_addr_offset + 2] = new_bytes[2];
-            inst_buf[rel_addr_offset + 3] = new_bytes[3];
+            // Update displacement in instruction
+            let disp_offset = (hs.len as usize)
+                .saturating_sub(4)
+                .saturating_sub(hs.immediate_size as usize);
+            if disp_offset + 4 <= hs.len as usize {
+                let disp_bytes = (new_disp as u32).to_le_bytes();
+                temp_buffer[disp_offset..disp_offset + 4].copy_from_slice(&disp_bytes);
+            }
 
-            // Complete the function if JMP (FF /4)
-            if hs.opcode == 0xFF && hs.modrm_reg == 4 {
+            unsafe {
+                ptr::copy_nonoverlapping(temp_buffer.as_ptr(), new_inst, hs.len as usize);
+            }
+
+            // Complete if indirect jump
+            if hs.opcode == 0xFF && hs.modrm_reg() == 4 {
                 finished = true;
             }
-        }
-        // Direct relative CALL
-        else if hs.opcode == 0xE8 {
-            let dest = p_old_inst + hs.len as usize + hs.immediate as usize;
-
-            let mut call = call_abs;
-            call.address = dest as u64;
-
+        } else if hs.opcode == 0xE8 {
+            // Direct relative CALL
+            let dest = old_inst as u64 + hs.len as u64 + hs.immediate as u64;
+            let call = CallAbs::new(dest);
+            let call_bytes = unsafe {
+                std::slice::from_raw_parts(
+                    &call as *const _ as *const u8,
+                    mem::size_of::<CallAbs>(),
+                )
+            };
             unsafe {
-                ptr::copy_nonoverlapping(
-                    &call as *const CallAbs as *const u8,
-                    inst_buf.as_mut_ptr(),
-                    size_of::<CallAbs>(),
-                );
+                ptr::copy_nonoverlapping(call_bytes.as_ptr(), new_inst, call_bytes.len());
             }
-
-            copy_src = inst_buf.as_ptr();
-            copy_size = size_of::<CallAbs>();
-        }
-        // Direct relative JMP (EB or E9)
-        else if (hs.opcode & 0xFD) == 0xE9 {
-            let mut dest = p_old_inst + hs.len as usize;
-
-            if hs.opcode == 0xEB {
-                // Short jump
-                dest = dest.wrapping_add((hs.immediate as i8) as usize);
+            copy_size = mem::size_of::<CallAbs>() as u8;
+        } else if hs.opcode == 0xE9 || hs.opcode == 0xEB {
+            // Direct relative JMP
+            let dest = if hs.opcode == 0xEB {
+                old_inst as u64 + hs.len as u64 + hs.immediate as i8 as i64 as u64
             } else {
-                // Long jump
-                dest = dest.wrapping_add(hs.immediate as usize);
-            }
+                old_inst as u64 + hs.len as u64 + hs.immediate as u64
+            };
 
-            // Simply copy an internal jump
-            if (trampoline.target as usize) <= dest
-                && dest < (trampoline.target as usize + JMP_REL_SIZE)
-            {
-                if jmp_dest < dest {
-                    jmp_dest = dest;
+            // Check if it's an internal jump
+            let target_start = ct.target as u64;
+            let target_end = target_start + mem::size_of::<JmpRel>() as u64;
+
+            if dest >= target_start && dest < target_end {
+                // Internal jump - copy as-is and update jump destination
+                if dest > jmp_dest as u64 {
+                    jmp_dest = dest as usize;
                 }
-            } else {
-                let mut jmp = jmp_abs;
-                jmp.address = dest as u64;
-
                 unsafe {
-                    ptr::copy_nonoverlapping(
-                        &jmp as *const JmpAbs as *const u8,
-                        inst_buf.as_mut_ptr(),
-                        size_of::<JmpAbs>(),
-                    );
+                    ptr::copy_nonoverlapping(old_inst, new_inst, hs.len as usize);
+                }
+            } else {
+                // External jump - use absolute jump
+                let jmp = JmpAbs::new(dest);
+                let jmp_bytes = unsafe {
+                    std::slice::from_raw_parts(
+                        &jmp as *const _ as *const u8,
+                        mem::size_of::<JmpAbs>(),
+                    )
+                };
+                unsafe {
+                    ptr::copy_nonoverlapping(jmp_bytes.as_ptr(), new_inst, jmp_bytes.len());
+                }
+                copy_size = mem::size_of::<JmpAbs>() as u8;
+                finished = old_inst as usize >= jmp_dest;
+            }
+        } else if hs.is_conditional_jump() {
+            // Conditional jumps
+            let dest = if hs.opcode == 0x0F {
+                old_inst as u64 + hs.len as u64 + hs.immediate as u64
+            } else {
+                old_inst as u64 + hs.len as u64 + hs.immediate as i8 as i64 as u64
+            };
+
+            let target_start = ct.target as u64;
+            let target_end = target_start + mem::size_of::<JmpRel>() as u64;
+
+            if dest >= target_start && dest < target_end {
+                // Internal conditional jump
+                if dest > jmp_dest as u64 {
+                    jmp_dest = dest as usize;
+                }
+                unsafe {
+                    ptr::copy_nonoverlapping(old_inst, new_inst, hs.len as usize);
+                }
+            } else {
+                // External conditional jump - not supported for LOOP instructions
+                if (hs.opcode & 0xFC) == 0xE0 {
+                    return Err(HookError::UnsupportedFunction);
                 }
 
-                copy_src = inst_buf.as_ptr();
-                copy_size = size_of::<JmpAbs>();
-
-                // Exit the function if it is not in the branch
-                finished = p_old_inst >= jmp_dest;
-            }
-        }
-        // Direct relative Jcc
-        else if (hs.opcode & 0xF0) == 0x70
-            || (hs.opcode & 0xFC) == 0xE0
-            || (hs.opcode2 & 0xF0) == 0x80
-        {
-            let mut dest = p_old_inst + hs.len as usize;
-
-            if (hs.opcode & 0xF0) == 0x70      // Jcc
-                || (hs.opcode & 0xFC) == 0xE0
-            // LOOPNZ/LOOPZ/LOOP/JECXZ
-            {
-                dest = dest.wrapping_add((hs.immediate as i8) as usize);
-            } else {
-                dest = dest.wrapping_add(hs.immediate as usize);
-            }
-
-            // Simply copy an internal jump
-            if (trampoline.target as usize) <= dest
-                && dest < (trampoline.target as usize + JMP_REL_SIZE)
-            {
-                if jmp_dest < dest {
-                    jmp_dest = dest;
-                }
-            } else if (hs.opcode & 0xFC) == 0xE0 {
-                // LOOPNZ/LOOPZ/LOOP/JCXZ/JECXZ to the outside are not supported
-                return Err(HookError::UnsupportedFunction);
-            } else {
-                let cond = if hs.opcode != 0x0F {
-                    hs.opcode
+                // Use absolute conditional jump
+                let condition = if hs.opcode != 0x0F {
+                    hs.opcode & 0x0F
                 } else {
-                    hs.opcode2
-                } & 0x0F;
+                    hs.opcode2 & 0x0F
+                };
 
-                // Invert the condition in x64 mode to simplify the conditional jump logic
-                let mut jcc = jcc_abs;
-                jcc.opcode = 0x71 ^ cond;
-                jcc.address = dest as u64;
-
+                let jcc = JccAbs::new(condition ^ 1, dest); // Invert condition
+                let jcc_bytes = unsafe {
+                    std::slice::from_raw_parts(
+                        &jcc as *const _ as *const u8,
+                        mem::size_of::<JccAbs>(),
+                    )
+                };
                 unsafe {
-                    ptr::copy_nonoverlapping(
-                        &jcc as *const JccAbs as *const u8,
-                        inst_buf.as_mut_ptr(),
-                        size_of::<JccAbs>(),
-                    );
+                    ptr::copy_nonoverlapping(jcc_bytes.as_ptr(), new_inst, jcc_bytes.len());
                 }
-
-                copy_src = inst_buf.as_ptr();
-                copy_size = size_of::<JccAbs>();
+                copy_size = mem::size_of::<JccAbs>() as u8;
+            }
+        } else if hs.opcode == 0xC2 || hs.opcode == 0xC3 {
+            // RET instruction - complete if not in branch
+            finished = (old_inst as usize) >= jmp_dest;
+            unsafe {
+                ptr::copy_nonoverlapping(old_inst, new_inst, hs.len as usize);
+            }
+        } else {
+            // Regular instruction - copy as-is
+            unsafe {
+                ptr::copy_nonoverlapping(old_inst, new_inst, hs.len as usize);
             }
         }
-        // RET (C2 or C3)
-        else if (hs.opcode & 0xFE) == 0xC2 {
-            // Complete the function if not in a branch
-            finished = p_old_inst >= jmp_dest;
-        }
 
-        // Can't alter the instruction length in a branch
-        if p_old_inst < jmp_dest && copy_size != hs.len as usize {
+        // Check size limits
+        if (old_inst as usize) < jmp_dest && copy_size != hs.len {
             return Err(HookError::UnsupportedFunction);
         }
 
-        // Trampoline function is too large
-        if (new_pos as usize + copy_size) > TRAMPOLINE_MAX_SIZE {
+        if (new_pos as usize + copy_size as usize) > TRAMPOLINE_MAX_SIZE {
             return Err(HookError::UnsupportedFunction);
         }
 
-        // Trampoline function has too many instructions (ARRAYSIZE(ct->oldIPs) = 8)
-        if trampoline.n_ip >= 8 {
+        if ct.n_ip >= ct.old_ips.len() as u32 {
             return Err(HookError::UnsupportedFunction);
         }
 
         // Record instruction boundaries
-        trampoline.old_ips[trampoline.n_ip as usize] = old_pos;
-        trampoline.new_ips[trampoline.n_ip as usize] = new_pos;
-        trampoline.n_ip += 1;
+        ct.old_ips[ct.n_ip as usize] = old_pos;
+        ct.new_ips[ct.n_ip as usize] = new_pos;
+        ct.n_ip += 1;
 
-        // Copy instruction (like __movsb in original)
-        unsafe {
-            ptr::copy_nonoverlapping(
-                copy_src,
-                (trampoline.trampoline as *mut u8).add(new_pos as usize),
-                copy_size,
-            );
-        }
-
-        new_pos += copy_size as u8;
+        new_pos += copy_size;
         old_pos += hs.len;
 
         if finished {
@@ -296,84 +213,67 @@ pub fn create_trampoline_function(trampoline: &mut Trampoline) -> Result<()> {
         }
     }
 
-    // Is there enough place for a long jump?
-    if (old_pos as usize) < JMP_REL_SIZE {
-        let remaining = JMP_REL_SIZE - old_pos as usize;
-        let padding_slice = unsafe {
-            std::slice::from_raw_parts(
-                (trampoline.target as *const u8).add(old_pos as usize),
-                remaining,
-            )
-        };
+    // Check if we have enough space for the hook
+    if (old_pos as usize) < mem::size_of::<JmpRel>() {
+        let padding_size = mem::size_of::<JmpRel>() - old_pos as usize;
+        let padding_start = (ct.target as usize + old_pos as usize) as *const u8;
 
-        if !is_code_padding(padding_slice) {
-            // Is there enough place for a short jump?
-            if (old_pos as usize) < JMP_REL_SHORT_SIZE {
-                let short_remaining = JMP_REL_SHORT_SIZE - old_pos as usize;
-                let short_padding_slice = unsafe {
-                    std::slice::from_raw_parts(
-                        (trampoline.target as *const u8).add(old_pos as usize),
-                        short_remaining,
-                    )
-                };
-
-                if !is_code_padding(short_padding_slice) {
+        // Check if there's padding after the function
+        if !is_code_padding(padding_start, padding_size) {
+            // Check for short jump space
+            if (old_pos as usize) < mem::size_of::<JmpRelShort>() {
+                let short_padding_size = mem::size_of::<JmpRelShort>() - old_pos as usize;
+                if !is_code_padding(padding_start, short_padding_size) {
                     return Err(HookError::UnsupportedFunction);
                 }
             }
 
-            // Can we place the long jump above the function?
-            let above_addr =
-                unsafe { (trampoline.target as *const u8).sub(JMP_REL_SIZE) as *mut c_void };
-
-            if !is_executable_address(above_addr) {
+            // Try to use hot patch area above the function
+            let hot_patch_addr = (ct.target as usize - mem::size_of::<JmpRel>()) as *mut c_void;
+            if !is_executable_address(hot_patch_addr) {
                 return Err(HookError::UnsupportedFunction);
             }
 
-            let above_slice =
-                unsafe { std::slice::from_raw_parts(above_addr as *const u8, JMP_REL_SIZE) };
-
-            if !is_code_padding(above_slice) {
+            let hot_patch_bytes = (ct.target as usize - mem::size_of::<JmpRel>()) as *const u8;
+            if !is_code_padding(hot_patch_bytes, mem::size_of::<JmpRel>()) {
                 return Err(HookError::UnsupportedFunction);
             }
 
-            trampoline.patch_above = true;
+            ct.patch_above = true;
         }
     }
 
-    // Create a relay function (exactly like original)
-    let mut relay_jmp = jmp_abs;
-    relay_jmp.address = trampoline.detour as u64;
-
-    trampoline.relay =
-        unsafe { (trampoline.trampoline as *mut u8).add(new_pos as usize) as *mut c_void };
+    // Create relay function
+    let jmp = JmpAbs::new(ct.detour as u64);
+    ct.relay = ((ct.trampoline as usize) + new_pos as usize) as *mut c_void;
 
     unsafe {
-        ptr::copy_nonoverlapping(
-            &relay_jmp as *const JmpAbs as *const u8,
-            trampoline.relay as *mut u8,
-            size_of::<JmpAbs>(),
-        );
+        let jmp_bytes =
+            std::slice::from_raw_parts(&jmp as *const _ as *const u8, mem::size_of::<JmpAbs>());
+        ptr::copy_nonoverlapping(jmp_bytes.as_ptr(), ct.relay as *mut u8, jmp_bytes.len());
     }
 
     Ok(())
 }
 
-/// Allocate and create a trampoline function
-pub fn allocate_trampoline(target: *mut c_void, detour: *mut c_void) -> Result<Trampoline> {
-    // Allocate buffer near the target function
-    let buffer = allocate_buffer(target)?;
+/// Check if memory region contains only padding bytes
+fn is_code_padding(inst: *const u8, size: usize) -> bool {
+    if size == 0 {
+        return true;
+    }
 
-    // Create trampoline structure
-    let mut trampoline = Trampoline::new(target, detour, buffer);
+    unsafe {
+        let first_byte = *inst;
+        if first_byte != 0x00 && first_byte != 0x90 && first_byte != 0xCC {
+            return false;
+        }
 
-    // Create the trampoline function
-    match create_trampoline_function(&mut trampoline) {
-        Ok(()) => Ok(trampoline),
-        Err(e) => {
-            // Clean up on error
-            crate::buffer::free_buffer(buffer);
-            Err(e)
+        for i in 1..size {
+            if *inst.add(i) != first_byte {
+                return false;
+            }
         }
     }
+
+    true
 }

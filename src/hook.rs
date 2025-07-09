@@ -1,16 +1,23 @@
 //! Hook management for MinHook-rs
 //!
-//! This module provides the main API for creating, enabling, and managing function hooks.
-//! Direct port of hook.c, maintaining exact compatibility with original MinHook.
+//! This module provides the main API for creating, enabling, disabling, and managing function hooks.
+//! It is a direct port of MinHook's hook.c, maintaining compatibility with the original C implementation.
+//!
+//! The core logic includes:
+//! - Global hook manager with thread-safe access (using Mutex)
+//! - Dynamic allocation and management of hook entries
+//! - Thread freezing and context adjustment for safe patching
+//! - API for creating, removing, enabling, disabling, and queuing hooks
+//! - Utility for working with Windows modules and function addresses
 
 use crate::buffer::{free_buffer, initialize_buffer, is_executable_address, uninitialize_buffer};
 use crate::error::{HookError, Result};
 use crate::instruction::*;
-use crate::trampoline::allocate_trampoline;
+use crate::trampoline::create_trampoline;
 use std::ffi::c_void;
+use std::mem;
 use std::ptr;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::System::Diagnostics::Debug::*;
 use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
@@ -21,87 +28,76 @@ use windows_sys::Win32::System::Threading::*;
 #[cfg(not(target_arch = "x86_64"))]
 compile_error!("Hook module only supports x86_64 architecture");
 
-/// Initial capacity of the HOOK_ENTRY buffer
+/// Initial capacity for the hook entry buffer.
 const INITIAL_HOOK_CAPACITY: usize = 32;
-
-/// Initial capacity of the thread IDs buffer
+/// Initial capacity for the thread ID buffer.
 const INITIAL_THREAD_CAPACITY: usize = 128;
-
-/// Special hook position values (matching C code)
+/// Special value indicating an invalid hook position.
 const INVALID_HOOK_POS: usize = usize::MAX;
+/// Special value indicating all hooks.
 const ALL_HOOKS_POS: usize = usize::MAX;
-
-/// Freeze() action argument defines (matching C code)
+/// Action code for disabling hooks.
 const ACTION_DISABLE: u32 = 0;
+/// Action code for enabling hooks.
 const ACTION_ENABLE: u32 = 1;
+/// Action code for applying queued hook changes.
 const ACTION_APPLY_QUEUED: u32 = 2;
-
-/// Thread access rights for suspending/resuming threads
+/// Thread access rights for suspending/resuming threads.
 const THREAD_ACCESS: u32 =
     THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION | THREAD_SET_CONTEXT;
 
-/// Hook information - exact port of C HOOK_ENTRY
+/// Represents a single hook entry.
 #[derive(Debug, Clone)]
 struct HookEntry {
-    /// Address of the target function
+    /// Address of the target function.
     target: *mut c_void,
-    /// Address of the detour or relay function
+    /// Address of the detour or relay function.
     detour: *mut c_void,
-    /// Address of the trampoline function
+    /// Address of the trampoline function.
     trampoline: *mut c_void,
-    /// Original prologue of the target function
+    /// Backup of the original prologue of the target function.
     backup: [u8; 8],
-
-    /// Uses the hot patch area
+    /// Whether the hot patch area is used.
     patch_above: bool,
-    /// Enabled
+    /// Whether the hook is currently enabled.
     is_enabled: bool,
-    /// Queued for enabling/disabling when != is_enabled
+    /// Whether the hook is queued for enabling/disabling.
     queue_enable: bool,
-
-    /// Count of the instruction boundaries
+    /// Number of instruction boundaries.
     n_ip: u32,
-    /// Instruction boundaries of the target function
+    /// Instruction boundaries of the target function.
     old_ips: [u8; 8],
-    /// Instruction boundaries of the trampoline function
+    /// Instruction boundaries of the trampoline function.
     new_ips: [u8; 8],
 }
 
-/// Suspended threads for Freeze()/Unfreeze() - exact port of C FROZEN_THREADS
+/// Stores thread IDs and allocation info for thread freezing.
 struct FrozenThreads {
-    /// Data heap
     items: Vec<u32>,
-    /// Size of allocated data heap, items
     capacity: usize,
-    /// Actual number of data items
     size: usize,
 }
 
-/// Hook entries collection - exact port of C g_hooks structure
+/// Stores all hook entries and allocation info.
 struct HookCollection {
-    /// Data heap
     items: Vec<HookEntry>,
-    /// Size of allocated data heap, items
     capacity: usize,
-    /// Actual number of data items
     size: usize,
 }
 
-/// Global hook manager - exact port of C global variables
+/// Global hook manager, responsible for all hook operations.
 struct HookManager {
-    /// Private heap handle equivalent. If false, this library is not initialized.
+    /// Indicates if the library is initialized.
     heap: bool,
-    /// Hook entries
+    /// Collection of all hook entries.
     hooks: HookCollection,
 }
 
-/// Spin lock flag for enter_spin_lock()/leave_spin_lock()
-static G_IS_LOCKED: AtomicBool = AtomicBool::new(false);
-
-/// Global hook manager instance
-static HOOK_MANAGER: Mutex<HookManager> = Mutex::new(HookManager::new());
+/// Global singleton for the hook manager, protected by a Mutex.
+static HOOK_MANAGER: OnceLock<Mutex<HookManager>> = OnceLock::new();
 
 impl HookEntry {
+    /// Creates a new, empty hook entry.
     fn new() -> Self {
         Self {
             target: ptr::null_mut(),
@@ -119,16 +115,7 @@ impl HookEntry {
 }
 
 impl FrozenThreads {
-    fn new() -> Self {
-        Self {
-            items: Vec::new(),
-            capacity: 0,
-            size: 0,
-        }
-    }
-}
-
-impl HookCollection {
+    /// Creates a new, empty frozen threads structure.
     fn new() -> Self {
         Self {
             items: Vec::new(),
@@ -139,6 +126,7 @@ impl HookCollection {
 }
 
 impl HookManager {
+    /// Creates a new, uninitialized hook manager.
     const fn new() -> Self {
         Self {
             heap: false,
@@ -150,7 +138,7 @@ impl HookManager {
         }
     }
 
-    /// Returns INVALID_HOOK_POS if not found - exact port of FindHookEntry
+    /// Finds the index of a hook entry by target address.
     fn find_hook_entry(&self, target: *mut c_void) -> usize {
         for i in 0..self.hooks.size {
             if std::ptr::eq(target, self.hooks.items[i].target) {
@@ -160,7 +148,7 @@ impl HookManager {
         INVALID_HOOK_POS
     }
 
-    /// Add hook entry - exact port of AddHookEntry
+    /// Adds a new hook entry, growing the buffer if needed.
     fn add_hook_entry(&mut self) -> Option<&mut HookEntry> {
         if self.hooks.items.is_empty() {
             self.hooks.capacity = INITIAL_HOOK_CAPACITY;
@@ -175,21 +163,18 @@ impl HookManager {
                 return None;
             }
         }
-
         self.hooks.items.push(HookEntry::new());
         self.hooks.size += 1;
         Some(&mut self.hooks.items[self.hooks.size - 1])
     }
 
-    /// Delete hook entry - exact port of DeleteHookEntry
+    /// Deletes a hook entry at the given index, shrinking the buffer if needed.
     fn delete_hook_entry(&mut self, pos: usize) {
         if pos < self.hooks.size - 1 {
             self.hooks.items[pos] = self.hooks.items[self.hooks.size - 1].clone();
         }
-
         self.hooks.size -= 1;
         self.hooks.items.truncate(self.hooks.size);
-
         if self.hooks.capacity / 2 >= INITIAL_HOOK_CAPACITY
             && self.hooks.capacity / 2 >= self.hooks.size
         {
@@ -198,27 +183,23 @@ impl HookManager {
         }
     }
 
-    /// Find old IP from new IP - exact port of FindOldIP
+    /// Finds the original instruction pointer for a thread, used when disabling a hook.
     fn find_old_ip(&self, hook: &HookEntry, ip: usize) -> usize {
-        if hook.patch_above && ip == (hook.target as usize - size_of::<JmpRel>()) {
+        if hook.patch_above && ip == (hook.target as usize - mem::size_of::<JmpRel>()) {
             return hook.target as usize;
         }
-
         for i in 0..hook.n_ip as usize {
             if ip == (hook.trampoline as usize + hook.new_ips[i] as usize) {
                 return hook.target as usize + hook.old_ips[i] as usize;
             }
         }
-
-        // Check relay function
         if ip == hook.detour as usize {
             return hook.target as usize;
         }
-
         0
     }
 
-    /// Find new IP from old IP - exact port of FindNewIP
+    /// Finds the new instruction pointer for a thread, used when enabling a hook.
     fn find_new_ip(&self, hook: &HookEntry, ip: usize) -> usize {
         for i in 0..hook.n_ip as usize {
             if ip == (hook.target as usize + hook.old_ips[i] as usize) {
@@ -228,44 +209,35 @@ impl HookManager {
         0
     }
 
-    /// Process thread IPs - exact port of ProcessThreadIPs
+    /// Adjusts thread instruction pointers if they are suspended in a patched region.
     fn process_thread_ips(&self, thread: HANDLE, pos: usize, action: u32) {
-        // If the thread suspended in the overwritten area,
-        // move IP to the proper address.
-
         let mut context = unsafe { std::mem::zeroed::<CONTEXT>() };
         context.ContextFlags = CONTEXT_CONTROL_AMD64;
-
         unsafe {
             if GetThreadContext(thread, &mut context) == 0 {
                 return;
             }
         }
-
         let (start_pos, count) = if pos == ALL_HOOKS_POS {
             (0, self.hooks.size)
         } else {
             (pos, pos + 1)
         };
-
         for i in start_pos..count {
             let hook = &self.hooks.items[i];
             let enable = match action {
                 ACTION_DISABLE => false,
                 ACTION_ENABLE => true,
-                _ => hook.queue_enable, // ACTION_APPLY_QUEUED
+                _ => hook.queue_enable,
             };
-
             if hook.is_enabled == enable {
                 continue;
             }
-
             let ip = if enable {
                 self.find_new_ip(hook, context.Rip as usize)
             } else {
                 self.find_old_ip(hook, context.Rip as usize)
             };
-
             if ip != 0 {
                 context.Rip = ip as u64;
                 unsafe {
@@ -275,18 +247,16 @@ impl HookManager {
         }
     }
 
-    /// Enumerate threads - exact port of EnumerateThreads
+    /// Enumerates all threads in the current process except the current thread.
     fn enumerate_threads(&self, threads: &mut FrozenThreads) -> bool {
         let mut succeeded = false;
-
         unsafe {
             let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
             if snapshot == INVALID_HANDLE_VALUE {
                 return false;
             }
-
             let mut te = THREADENTRY32 {
-                dwSize: size_of::<THREADENTRY32>() as u32,
+                dwSize: mem::size_of::<THREADENTRY32>() as u32,
                 cntUsage: 0,
                 th32ThreadID: 0,
                 th32OwnerProcessID: 0,
@@ -294,11 +264,10 @@ impl HookManager {
                 tpDeltaPri: 0,
                 dwFlags: 0,
             };
-
             if Thread32First(snapshot, &mut te) != 0 {
                 succeeded = true;
                 loop {
-                    if te.dwSize >= 16 // FIELD_OFFSET(THREADENTRY32, th32OwnerProcessID) + sizeof(DWORD)
+                    if te.dwSize >= 16
                         && te.th32OwnerProcessID == GetCurrentProcessId()
                         && te.th32ThreadID != GetCurrentThreadId()
                     {
@@ -320,41 +289,34 @@ impl HookManager {
                         threads.items.push(te.th32ThreadID);
                         threads.size += 1;
                     }
-
-                    te.dwSize = size_of::<THREADENTRY32>() as u32;
+                    te.dwSize = mem::size_of::<THREADENTRY32>() as u32;
                     if Thread32Next(snapshot, &mut te) == 0 {
                         break;
                     }
                 }
-
                 if succeeded && GetLastError() != ERROR_NO_MORE_FILES {
                     succeeded = false;
                 }
-
                 if !succeeded {
                     threads.items.clear();
                 }
             }
             CloseHandle(snapshot);
         }
-
         succeeded
     }
 
-    /// Freeze threads - exact port of Freeze
+    /// Suspends all threads (except current), and adjusts their instruction pointers if needed.
     fn freeze(&self, threads: &mut FrozenThreads, pos: usize, action: u32) -> Result<()> {
         *threads = FrozenThreads::new();
-
         if !self.enumerate_threads(threads) {
             return Err(HookError::MemoryAlloc);
         }
-
         if !threads.items.is_empty() {
             for i in 0..threads.size {
                 unsafe {
                     let thread_handle = OpenThread(THREAD_ACCESS, FALSE, threads.items[i]);
                     let mut suspended = false;
-
                     if !thread_handle.is_null() {
                         let result = SuspendThread(thread_handle);
                         if result != 0xFFFFFFFF {
@@ -363,19 +325,16 @@ impl HookManager {
                         }
                         CloseHandle(thread_handle);
                     }
-
                     if !suspended {
-                        // Mark thread as not suspended, so it's not resumed later on
                         threads.items[i] = 0;
                     }
                 }
             }
         }
-
         Ok(())
     }
 
-    /// Unfreeze threads - exact port of Unfreeze
+    /// Resumes all previously suspended threads.
     fn unfreeze(&self, threads: &FrozenThreads) {
         if !threads.items.is_empty() {
             for i in 0..threads.size {
@@ -393,21 +352,20 @@ impl HookManager {
         }
     }
 
-    /// Enable hook at low level - exact port of EnableHookLL
+    /// Actually enables or disables a hook at the given index, patching code as needed.
     fn enable_hook_ll(&mut self, pos: usize, enable: bool) -> Result<()> {
         let hook = &mut self.hooks.items[pos];
         let mut old_protect = 0u32;
         let patch_size = if hook.patch_above {
-            size_of::<JmpRel>() + size_of::<JmpRelShort>()
+            mem::size_of::<JmpRel>() + mem::size_of::<JmpRelShort>()
         } else {
-            size_of::<JmpRel>()
+            mem::size_of::<JmpRel>()
         };
         let patch_target = if hook.patch_above {
-            unsafe { (hook.target as *mut u8).sub(size_of::<JmpRel>()) }
+            unsafe { (hook.target as *mut u8).sub(mem::size_of::<JmpRel>()) }
         } else {
             hook.target as *mut u8
         };
-
         unsafe {
             if VirtualProtect(
                 patch_target as *mut c_void,
@@ -418,68 +376,62 @@ impl HookManager {
             {
                 return Err(HookError::MemoryProtect);
             }
-
             if enable {
-                // Create JMP_REL
                 let jmp = JmpRel::new_jmp(
-                    (hook.detour as isize - (patch_target as isize + size_of::<JmpRel>() as isize))
+                    (hook.detour as isize
+                        - (patch_target as isize + mem::size_of::<JmpRel>() as isize))
                         as i32,
                 );
                 ptr::copy_nonoverlapping(
                     &jmp as *const JmpRel as *const u8,
                     patch_target,
-                    size_of::<JmpRel>(),
+                    mem::size_of::<JmpRel>(),
                 );
-
                 if hook.patch_above {
-                    // Create short jump at original location
                     let short_jmp = JmpRelShort::new(
-                        -(size_of::<JmpRelShort>() as i8 + size_of::<JmpRel>() as i8),
+                        -(mem::size_of::<JmpRelShort>() as i8 + mem::size_of::<JmpRel>() as i8),
                     );
                     ptr::copy_nonoverlapping(
                         &short_jmp as *const JmpRelShort as *const u8,
                         hook.target as *mut u8,
-                        size_of::<JmpRelShort>(),
+                        mem::size_of::<JmpRelShort>(),
                     );
                 }
             } else if hook.patch_above {
                 ptr::copy_nonoverlapping(
                     hook.backup.as_ptr(),
                     patch_target,
-                    size_of::<JmpRel>() + size_of::<JmpRelShort>(),
+                    mem::size_of::<JmpRel>() + mem::size_of::<JmpRelShort>(),
                 );
             } else {
-                ptr::copy_nonoverlapping(hook.backup.as_ptr(), patch_target, size_of::<JmpRel>());
+                ptr::copy_nonoverlapping(
+                    hook.backup.as_ptr(),
+                    patch_target,
+                    mem::size_of::<JmpRel>(),
+                );
             }
-
             VirtualProtect(
                 patch_target as *mut c_void,
                 patch_size,
                 old_protect,
                 &mut old_protect,
             );
-
-            // Just-in-case measure
             FlushInstructionCache(GetCurrentProcess(), patch_target as *mut c_void, patch_size);
         }
-
         hook.is_enabled = enable;
         hook.queue_enable = enable;
-
         Ok(())
     }
 
-    /// Enable all hooks at low level - exact port of EnableAllHooksLL
+    /// Enables or disables all hooks.
     fn enable_all_hooks_ll(&mut self, enable: bool) -> Result<()> {
         let mut first = INVALID_HOOK_POS;
-
         for i in 0..self.hooks.size {
             if self.hooks.items[i].is_enabled != enable {
                 first = i;
                 break;
             }
         }
-
         if first != INVALID_HOOK_POS {
             let mut threads = FrozenThreads::new();
             self.freeze(
@@ -491,7 +443,6 @@ impl HookManager {
                     ACTION_DISABLE
                 },
             )?;
-
             let mut result = Ok(());
             for i in first..self.hooks.size {
                 if self.hooks.items[i].is_enabled != enable {
@@ -501,7 +452,6 @@ impl HookManager {
                     }
                 }
             }
-
             self.unfreeze(&threads);
             result
         } else {
@@ -509,12 +459,11 @@ impl HookManager {
         }
     }
 
-    /// Enable/disable hook - exact port of EnableHook
+    /// Public API: enables or disables a specific hook or all hooks.
     fn enable_hook(&mut self, target: *mut c_void, enable: bool) -> Result<()> {
         if !self.heap {
             return Err(HookError::NotInitialized);
         }
-
         if target == ALL_HOOKS {
             self.enable_all_hooks_ll(enable)
         } else {
@@ -523,7 +472,6 @@ impl HookManager {
                 if self.hooks.items[pos].is_enabled != enable {
                     let mut threads = FrozenThreads::new();
                     self.freeze(&mut threads, pos, ACTION_ENABLE)?;
-
                     let result = self.enable_hook_ll(pos, enable);
                     self.unfreeze(&threads);
                     result
@@ -540,12 +488,11 @@ impl HookManager {
         }
     }
 
-    /// Queue hook for enable/disable - exact port of QueueHook
+    /// Queues a hook for enabling or disabling.
     fn queue_hook(&mut self, target: *mut c_void, queue_enable: bool) -> Result<()> {
         if !self.heap {
             return Err(HookError::NotInitialized);
         }
-
         if target == ALL_HOOKS {
             for i in 0..self.hooks.size {
                 self.hooks.items[i].queue_enable = queue_enable;
@@ -558,29 +505,24 @@ impl HookManager {
                 return Err(HookError::NotCreated);
             }
         }
-
         Ok(())
     }
 
-    /// Apply queued operations - exact port of MH_ApplyQueued
+    /// Applies all queued hook enable/disable operations.
     fn apply_queued(&mut self) -> Result<()> {
         if !self.heap {
             return Err(HookError::NotInitialized);
         }
-
         let mut first = INVALID_HOOK_POS;
-
         for i in 0..self.hooks.size {
             if self.hooks.items[i].is_enabled != self.hooks.items[i].queue_enable {
                 first = i;
                 break;
             }
         }
-
         if first != INVALID_HOOK_POS {
             let mut threads = FrozenThreads::new();
             self.freeze(&mut threads, ALL_HOOKS_POS, ACTION_APPLY_QUEUED)?;
-
             let mut result = Ok(());
             for i in first..self.hooks.size {
                 let hook = &self.hooks.items[i];
@@ -591,7 +533,6 @@ impl HookManager {
                     }
                 }
             }
-
             self.unfreeze(&threads);
             result
         } else {
@@ -599,60 +540,47 @@ impl HookManager {
         }
     }
 
-    /// Initialize - exact port of MH_Initialize
+    /// Initializes the hook manager and internal buffer.
     fn initialize(&mut self) -> Result<()> {
         if self.heap {
             return Err(HookError::AlreadyInitialized);
         }
-
-        // Initialize the internal function buffer
         initialize_buffer();
         self.heap = true;
-
         Ok(())
     }
 
-    /// Uninitialize - exact port of MH_Uninitialize
+    /// Uninitializes the hook manager and releases all resources.
     fn uninitialize(&mut self) -> Result<()> {
         if !self.heap {
             return Err(HookError::NotInitialized);
         }
-
         self.enable_all_hooks_ll(false)?;
-
-        // Free the internal function buffer
         uninitialize_buffer();
-
-        // Clear hooks
         self.hooks.items.clear();
         self.hooks.capacity = 0;
         self.hooks.size = 0;
         self.heap = false;
-
         Ok(())
     }
 
-    /// Create hook - exact port of MH_CreateHook
+    /// Creates a new hook for the specified target and detour.
     fn create_hook(&mut self, target: *mut c_void, detour: *mut c_void) -> Result<*mut c_void> {
         if !self.heap {
             return Err(HookError::NotInitialized);
         }
-
         if !is_executable_address(target) || !is_executable_address(detour) {
             return Err(HookError::NotExecutable);
         }
-
         let pos = self.find_hook_entry(target);
         if pos != INVALID_HOOK_POS {
             return Err(HookError::AlreadyCreated);
         }
-
-        let trampoline = allocate_trampoline(target, detour)?;
-
+        let mut trampoline = Trampoline::new(target, detour, ptr::null_mut());
+        create_trampoline(&mut trampoline)?;
         let hook_entry = self.add_hook_entry().ok_or(HookError::MemoryAlloc)?;
-
         hook_entry.target = target;
-        hook_entry.detour = trampoline.relay; // Use relay for x64
+        hook_entry.detour = trampoline.relay;
         hook_entry.trampoline = trampoline.trampoline;
         hook_entry.patch_above = trampoline.patch_above;
         hook_entry.is_enabled = false;
@@ -660,188 +588,130 @@ impl HookManager {
         hook_entry.n_ip = trampoline.n_ip;
         hook_entry.old_ips = trampoline.old_ips;
         hook_entry.new_ips = trampoline.new_ips;
-
-        // Back up the target function
         unsafe {
             if trampoline.patch_above {
                 ptr::copy_nonoverlapping(
-                    (target as *const u8).sub(size_of::<JmpRel>()),
+                    (target as *const u8).sub(mem::size_of::<JmpRel>()),
                     hook_entry.backup.as_mut_ptr(),
-                    size_of::<JmpRel>() + size_of::<JmpRelShort>(),
+                    mem::size_of::<JmpRel>() + mem::size_of::<JmpRelShort>(),
                 );
             } else {
                 ptr::copy_nonoverlapping(
                     target as *const u8,
                     hook_entry.backup.as_mut_ptr(),
-                    size_of::<JmpRel>(),
+                    mem::size_of::<JmpRel>(),
                 );
             }
         }
-
         Ok(hook_entry.trampoline)
     }
 
-    /// Remove hook - exact port of MH_RemoveHook
+    /// Removes a hook for the specified target.
     fn remove_hook(&mut self, target: *mut c_void) -> Result<()> {
         if !self.heap {
             return Err(HookError::NotInitialized);
         }
-
         let pos = self.find_hook_entry(target);
         if pos == INVALID_HOOK_POS {
             return Err(HookError::NotCreated);
         }
-
         if self.hooks.items[pos].is_enabled {
             let mut threads = FrozenThreads::new();
             self.freeze(&mut threads, pos, ACTION_DISABLE)?;
             self.enable_hook_ll(pos, false)?;
             self.unfreeze(&threads);
         }
-
         let trampoline = self.hooks.items[pos].trampoline;
         free_buffer(trampoline);
         self.delete_hook_entry(pos);
-
         Ok(())
     }
 }
 
-/// Enter spin lock - exact port of EnterSpinLock
-fn enter_spin_lock() {
-    let mut spin_count = 0;
-
-    // Wait until the flag is FALSE
-    while G_IS_LOCKED
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        // Prevent the loop from being too busy
-        if spin_count < 32 {
-            unsafe { Sleep(0) };
-        } else {
-            unsafe { Sleep(1) };
-        }
-        spin_count += 1;
-    }
-}
-
-/// Leave spin lock - exact port of LeaveSpinLock
-fn leave_spin_lock() {
-    G_IS_LOCKED.store(false, Ordering::SeqCst);
-}
-
-/// Mark as thread-safe
 unsafe impl Send for HookManager {}
 unsafe impl Sync for HookManager {}
 
-/// Special value representing all hooks - exact port of MH_ALL_HOOKS
+/// Special value for targeting all hooks.
 pub const ALL_HOOKS: *mut c_void = ptr::null_mut();
 
-//=============================================================================
-// Public API Functions - exact ports of MinHook C API
-//=============================================================================
+/// Returns a reference to the global hook manager.
+fn get_manager() -> &'static Mutex<HookManager> {
+    HOOK_MANAGER.get_or_init(|| Mutex::new(HookManager::new()))
+}
 
-/// Initialize the MinHook library - exact port of MH_Initialize
+/// Initializes the MinHook library.
 pub fn initialize() -> Result<()> {
-    enter_spin_lock();
-    let result = HOOK_MANAGER
+    get_manager()
         .lock()
         .map_err(|_| HookError::Unknown)?
-        .initialize();
-    leave_spin_lock();
-    result
+        .initialize()
 }
 
-/// Uninitialize the MinHook library - exact port of MH_Uninitialize
+/// Uninitializes the MinHook library and releases all resources.
 pub fn uninitialize() -> Result<()> {
-    enter_spin_lock();
-    let result = HOOK_MANAGER
+    get_manager()
         .lock()
         .map_err(|_| HookError::Unknown)?
-        .uninitialize();
-    leave_spin_lock();
-    result
+        .uninitialize()
 }
 
-/// Create a hook for the specified target function - exact port of MH_CreateHook
+/// Creates a hook for the specified target and detour.
 pub fn create_hook(target: *mut c_void, detour: *mut c_void) -> Result<*mut c_void> {
-    enter_spin_lock();
-    let result = HOOK_MANAGER
+    get_manager()
         .lock()
         .map_err(|_| HookError::Unknown)?
-        .create_hook(target, detour);
-    leave_spin_lock();
-    result
+        .create_hook(target, detour)
 }
 
-/// Remove an already created hook - exact port of MH_RemoveHook
+/// Removes a hook for the specified target.
 pub fn remove_hook(target: *mut c_void) -> Result<()> {
-    enter_spin_lock();
-    let result = HOOK_MANAGER
+    get_manager()
         .lock()
         .map_err(|_| HookError::Unknown)?
-        .remove_hook(target);
-    leave_spin_lock();
-    result
+        .remove_hook(target)
 }
 
-/// Enable an already created hook - exact port of MH_EnableHook
+/// Enables a hook for the specified target.
 pub fn enable_hook(target: *mut c_void) -> Result<()> {
-    enter_spin_lock();
-    let result = HOOK_MANAGER
+    get_manager()
         .lock()
         .map_err(|_| HookError::Unknown)?
-        .enable_hook(target, true);
-    leave_spin_lock();
-    result
+        .enable_hook(target, true)
 }
 
-/// Disable an already created hook - exact port of MH_DisableHook
+/// Disables a hook for the specified target.
 pub fn disable_hook(target: *mut c_void) -> Result<()> {
-    enter_spin_lock();
-    let result = HOOK_MANAGER
+    get_manager()
         .lock()
         .map_err(|_| HookError::Unknown)?
-        .enable_hook(target, false);
-    leave_spin_lock();
-    result
+        .enable_hook(target, false)
 }
 
-/// Queue to enable an already created hook - exact port of MH_QueueEnableHook
+/// Queues a hook to be enabled for the specified target.
 pub fn queue_enable_hook(target: *mut c_void) -> Result<()> {
-    enter_spin_lock();
-    let result = HOOK_MANAGER
+    get_manager()
         .lock()
         .map_err(|_| HookError::Unknown)?
-        .queue_hook(target, true);
-    leave_spin_lock();
-    result
+        .queue_hook(target, true)
 }
 
-/// Queue to disable an already created hook - exact port of MH_QueueDisableHook
+/// Queues a hook to be disabled for the specified target.
 pub fn queue_disable_hook(target: *mut c_void) -> Result<()> {
-    enter_spin_lock();
-    let result = HOOK_MANAGER
+    get_manager()
         .lock()
         .map_err(|_| HookError::Unknown)?
-        .queue_hook(target, false);
-    leave_spin_lock();
-    result
+        .queue_hook(target, false)
 }
 
-/// Apply all queued enable/disable operations - exact port of MH_ApplyQueued
+/// Applies all queued hook enable/disable operations.
 pub fn apply_queued() -> Result<()> {
-    enter_spin_lock();
-    let result = HOOK_MANAGER
+    get_manager()
         .lock()
         .map_err(|_| HookError::Unknown)?
-        .apply_queued();
-    leave_spin_lock();
-    result
+        .apply_queued()
 }
 
-/// Create a hook for the specified API function - exact port of MH_CreateHookApiEx
+/// Creates a hook for a function in a specific module by name, returning the trampoline and target.
 pub fn create_hook_api_ex(
     module_name: &str,
     proc_name: &str,
@@ -849,24 +719,20 @@ pub fn create_hook_api_ex(
 ) -> Result<(*mut c_void, *mut c_void)> {
     let module_wide = string_to_wide(module_name);
     let proc_c_str = string_to_c_string(proc_name);
-
     let hmodule = unsafe { GetModuleHandleW(module_wide.as_ptr()) };
     if hmodule.is_null() {
         return Err(HookError::ModuleNotFound);
     }
-
     let target = unsafe { GetProcAddress(hmodule, proc_c_str.as_ptr()) };
     if target.is_none() {
         return Err(HookError::FunctionNotFound);
     }
-
     let target_ptr = target.unwrap() as *mut c_void;
     let trampoline = create_hook(target_ptr, detour)?;
-
     Ok((trampoline, target_ptr))
 }
 
-/// Create a hook for the specified API function - exact port of MH_CreateHookApi
+/// Creates a hook for a function in a specific module by name.
 pub fn create_hook_api(
     module_name: &str,
     proc_name: &str,
@@ -875,21 +741,17 @@ pub fn create_hook_api(
     create_hook_api_ex(module_name, proc_name, detour)
 }
 
-/// Convert error code to string representation - exact port of MH_StatusToString
+/// Converts a HookError to a static string.
 pub fn status_to_string(error: HookError) -> &'static str {
     error.as_str()
 }
 
-//=============================================================================
-// Helper Functions
-//=============================================================================
-
-/// Convert Rust string to wide string for Windows API
+/// Converts a Rust string to a wide (UTF-16) null-terminated string for Windows APIs.
 fn string_to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// Convert Rust string to C string for Windows API
+/// Converts a Rust string to a C-style null-terminated string for Windows APIs.
 fn string_to_c_string(s: &str) -> Vec<u8> {
     s.bytes().chain(std::iter::once(0)).collect()
 }

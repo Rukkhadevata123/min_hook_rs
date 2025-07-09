@@ -50,11 +50,11 @@ pub struct CallAbs {
     pub opcode0: u8,
     /// Second opcode byte: 15
     pub opcode1: u8,
-    /// RIP offset to skip the JMP
+    /// RIP offset to skip the JMP (2 bytes ahead)
     pub dummy0: u32,
     /// Short jump opcode: EB
     pub dummy1: u8,
-    /// Short jump operand: 08
+    /// Short jump operand: 08 (skip 8 bytes to address)
     pub dummy2: u8,
     /// Absolute destination address
     pub address: u64,
@@ -78,7 +78,7 @@ pub struct JccRel {
 pub struct JccAbs {
     /// Conditional jump opcode: 7x
     pub opcode: u8,
-    /// Jump length to skip to indirect jump
+    /// Jump length to skip to indirect jump (14 bytes)
     pub dummy0: u8,
     /// Indirect jump opcode: FF
     pub dummy1: u8,
@@ -156,9 +156,9 @@ impl CallAbs {
         Self {
             opcode0: 0xFF,
             opcode1: 0x15,
-            dummy0: 0x00000002,
+            dummy0: 0x00000002, // Skip 2 bytes to the JMP instruction
             dummy1: 0xEB,
-            dummy2: 0x08,
+            dummy2: 0x08, // Skip 8 bytes to the address
             address,
         }
     }
@@ -180,7 +180,7 @@ impl JccAbs {
     pub fn new(condition: u8, address: u64) -> Self {
         Self {
             opcode: 0x70 | (condition & 0x0F),
-            dummy0: 0x0E,
+            dummy0: 0x0E, // Skip 14 bytes to avoid the indirect JMP
             dummy1: 0xFF,
             dummy2: 0x25,
             dummy3: 0x00000000,
