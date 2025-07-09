@@ -3,7 +3,8 @@ minhook
 gs_bilibili
 fpsunlock
 cpp_tmp/
-.ideaUnlockerIsland/
+.idea/
+UnlockerIsland/
 Detours/
 Snap.Hutao/
 hutao_game_info.tmp
