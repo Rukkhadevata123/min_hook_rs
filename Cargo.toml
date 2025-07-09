@@ -82,51 +82,6 @@ crate-type = ["cdylib"]
 name = "notepad_injector"
 path = "examples/notepad/notepad_injector.rs"
 
-# Genshin Examples
-
-[[example]]
-name = "hutao_minhook"
-path = "examples/genshin/hutao/rust/hutao_minhook.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "hutao_injector"
-path = "examples/genshin/hutao/rust/hutao_injector.rs"
-
-[[example]]
-name = "genshin_bili_dll"
-path = "examples/genshin/bilibili/genshin_bili_dll.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "genshin_bili_injector"
-path = "examples/genshin/bilibili/genshin_bili_injector.rs"
-
-[[example]]
-name = "fps_unlocker_wine"
-path = "examples/genshin/fps_unlocker/fps_unlocker_wine.rs"
-
-[[example]]
-name = "fps_unlocker_win"
-path = "examples/genshin/fps_unlocker/fps_unlocker_win.rs"
-
-[[example]]
-name = "fps_unlocker_win_hp"
-path = "examples/genshin/fps_unlocker/fps_unlocker_win_hp.rs"
-
-[[example]]
-name = "fps_unlocker_inj"
-path = "examples/genshin/fps_unlocker/fps_unlocker_inj.rs"
-
-[[example]]
-name = "fps_unlocker_dll"
-path = "examples/genshin/fps_unlocker/fps_unlocker_dll.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "process_info"
-path = "examples/genshin/process_info.rs"
-
 [profile.release]
 lto = true
 opt-level = "z"

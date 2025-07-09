@@ -14,7 +14,7 @@ use windows_sys::Win32::System::Threading::*;
 
 fn inject_dll(process_id: u32, dll_path: &str) -> Result<(), String> {
     if !Path::new(dll_path).exists() {
-        return Err(format!("DLL file does not exist: {}", dll_path));
+        return Err(format!("DLL file does not exist: {dll_path}"));
     }
 
     let dll_path_c = CString::new(dll_path).map_err(|_| "Invalid DLL path")?;
@@ -32,7 +32,7 @@ fn inject_dll(process_id: u32, dll_path: &str) -> Result<(), String> {
         );
 
         if process.is_null() {
-            return Err(format!("Cannot open process ID: {}", process_id));
+            return Err(format!("Cannot open process ID: {process_id}"));
         }
 
         // Allocate memory in target process
@@ -127,11 +127,11 @@ fn main() {
     let dll_path = &args[2];
 
     println!("Injecting DLL...");
-    println!("Process ID: {}", process_id);
-    println!("DLL Path: {}", dll_path);
+    println!("Process ID: {process_id}");
+    println!("DLL Path: {dll_path}");
 
     match inject_dll(process_id, dll_path) {
         Ok(()) => println!("DLL injection successful!"),
-        Err(e) => eprintln!("DLL injection failed: {}", e),
+        Err(e) => eprintln!("DLL injection failed: {e}"),
     }
 }

@@ -19,8 +19,8 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 // Inject DLL into target process
 fn inject_dll(process_id: u32, dll_path: &str) -> Result<()> {
-    println!("Injecting DLL into PID {}", process_id);
-    println!("DLL Path: {}", dll_path);
+    println!("Injecting DLL into PID {process_id}");
+    println!("DLL Path: {dll_path}");
 
     unsafe {
         // Open target process
@@ -36,8 +36,7 @@ fn inject_dll(process_id: u32, dll_path: &str) -> Result<()> {
 
         if process_handle.is_null() {
             return Err(format!(
-                "Failed to open process {} (insufficient privileges or process not found)",
-                process_id
+                "Failed to open process {process_id} (insufficient privileges or process not found)"
             )
             .into());
         }
@@ -85,7 +84,7 @@ fn inject_dll(process_id: u32, dll_path: &str) -> Result<()> {
             return Err("Failed to write DLL path to target process".into());
         }
 
-        println!("DLL path written ({} bytes)", bytes_written);
+        println!("DLL path written ({bytes_written} bytes)");
 
         // Get LoadLibraryA address
         let kernel32_handle = GetModuleHandleA(c"kernel32".as_ptr() as *const u8);
@@ -154,10 +153,7 @@ fn inject_dll(process_id: u32, dll_path: &str) -> Result<()> {
             );
         }
 
-        println!(
-            "DLL injected successfully! LoadLibrary returned: 0x{:x}",
-            exit_code
-        );
+        println!("DLL injected successfully! LoadLibrary returned: 0x{exit_code:x}");
         Ok(())
     }
 }
@@ -191,11 +187,11 @@ fn main() -> Result<()> {
 
     // Check if DLL exists
     if !std::path::Path::new(dll_path).exists() {
-        return Err(format!("DLL not found: {}", dll_path).into());
+        return Err(format!("DLL not found: {dll_path}").into());
     }
 
-    println!("Target PID: {}", process_id);
-    println!("DLL file: {}", dll_path);
+    println!("Target PID: {process_id}");
+    println!("DLL file: {dll_path}");
     println!();
 
     // Inject DLL
@@ -205,14 +201,14 @@ fn main() -> Result<()> {
             println!("Hook injection completed successfully!");
             println!();
             println!("Test the hook:");
-            println!("1. Go to the notepad window (PID: {})", process_id);
+            println!("1. Go to the notepad window (PID: {process_id})");
             println!("2. Type some text in notepad");
             println!("3. Try to close the window WITHOUT saving");
             println!("4. You should see a custom hook message instead of the normal save dialog");
         }
         Err(e) => {
             println!();
-            println!("Injection failed: {}", e);
+            println!("Injection failed: {e}");
             println!();
             println!("Troubleshooting:");
             println!("1. Make sure the PID is correct and notepad.exe is running");

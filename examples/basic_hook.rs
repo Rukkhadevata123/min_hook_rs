@@ -23,6 +23,7 @@ static mut MESSAGEBOX_HOOK_COUNT: u32 = 0;
 static mut GETTICKCOUNT_HOOK_COUNT: u32 = 0;
 
 // Hook function - modify message content
+#[allow(clippy::missing_safety_doc)]
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn hooked_messagebox(
     hwnd: HWND,
@@ -33,10 +34,10 @@ pub unsafe extern "system" fn hooked_messagebox(
     unsafe {
         MESSAGEBOX_HOOK_COUNT += 1;
         let count = ptr::addr_of!(MESSAGEBOX_HOOK_COUNT).read();
-        println!("[HOOK] MessageBoxA intercepted! Call #{}", count);
+        println!("[HOOK] MessageBoxA intercepted! Call #{count}");
 
         // Modified message content with call count
-        let new_text = format!("MinHook-rs intercepted this message!\nCall #{}\0", count);
+        let new_text = format!("MinHook-rs intercepted this message!\nCall #{count}\0");
         let new_caption = "[HOOKED] Demo\0";
 
         // Call original function
@@ -62,6 +63,7 @@ pub unsafe extern "system" fn hooked_messagebox(
 }
 
 // Hook GetTickCount for high-frequency testing
+#[allow(clippy::missing_safety_doc)]
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn hooked_gettickcount() -> u32 {
     unsafe {
@@ -71,7 +73,7 @@ pub unsafe extern "system" fn hooked_gettickcount() -> u32 {
 
         // Only print every 100 calls to avoid spam
         if count % 100 == 0 {
-            println!("[HOOK] GetTickCount intercepted! Call #{}", count);
+            println!("[HOOK] GetTickCount intercepted! Call #{count}");
         }
 
         // Call original function and add 1000ms to the result (for testing)
@@ -84,6 +86,7 @@ pub unsafe extern "system" fn hooked_gettickcount() -> u32 {
 }
 
 // Recursive hook test function
+#[allow(clippy::missing_safety_doc)]
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn hooked_recursive_messagebox(
     hwnd: HWND,
@@ -104,10 +107,7 @@ pub unsafe extern "system" fn hooked_recursive_messagebox(
                     c"Recursion".as_ptr() as *const u8,
                     utype,
                 );
-                println!(
-                    "[RECURSIVE HOOK] Recursive call completed, result: {}",
-                    result
-                );
+                println!("[RECURSIVE HOOK] Recursive call completed, result: {result}");
                 result
             }
             None => 0,
@@ -117,10 +117,10 @@ pub unsafe extern "system" fn hooked_recursive_messagebox(
 
 // Test MessageBox call
 fn show_test_message(title: &str, message: &str, description: &str) {
-    println!("{}", description);
+    println!("{description}");
 
-    let title_c = format!("{}\0", title);
-    let message_c = format!("{}\0", message);
+    let title_c = format!("{title}\0");
+    let message_c = format!("{message}\0");
 
     unsafe {
         MessageBoxA(
@@ -336,7 +336,7 @@ fn test_error_handling() -> Result<()> {
     match enable_hook(target) {
         Err(HookError::Enabled) => println!("✓ Correctly detected already enabled hook"),
         Ok(_) => println!("⚠ Hook enable should have failed"),
-        Err(e) => println!("⚠ Unexpected error: {:?}", e),
+        Err(e) => println!("⚠ Unexpected error: {e:?}"),
     }
 
     disable_hook(target)?;
@@ -346,7 +346,7 @@ fn test_error_handling() -> Result<()> {
     match disable_hook(target) {
         Err(HookError::Disabled) => println!("✓ Correctly detected already disabled hook"),
         Ok(_) => println!("⚠ Hook disable should have failed"),
-        Err(e) => println!("⚠ Unexpected error: {:?}", e),
+        Err(e) => println!("⚠ Unexpected error: {e:?}"),
     }
 
     // Test operations on non-existent hook
@@ -356,7 +356,7 @@ fn test_error_handling() -> Result<()> {
     match enable_hook(fake_target) {
         Err(HookError::NotCreated) => println!("✓ Correctly detected non-existent hook"),
         Ok(_) => println!("⚠ Enable should have failed for fake target"),
-        Err(e) => println!("⚠ Unexpected error for fake target: {:?}", e),
+        Err(e) => println!("⚠ Unexpected error for fake target: {e:?}"),
     }
 
     // Test duplicate hook creation
@@ -364,7 +364,7 @@ fn test_error_handling() -> Result<()> {
     match create_hook_api("user32", "MessageBoxA", hooked_messagebox as *mut c_void) {
         Err(HookError::AlreadyCreated) => println!("✓ Correctly detected duplicate hook"),
         Ok(_) => println!("⚠ Duplicate hook creation should have failed"),
-        Err(e) => println!("⚠ Unexpected error for duplicate: {:?}", e),
+        Err(e) => println!("⚠ Unexpected error for duplicate: {e:?}"),
     }
 
     // Test invalid module/function
@@ -377,7 +377,7 @@ fn test_error_handling() -> Result<()> {
         Err(HookError::ModuleNotFound) => println!("✓ Correctly detected invalid module"),
         Err(HookError::FunctionNotFound) => println!("✓ Correctly detected invalid function"),
         Ok(_) => println!("⚠ Invalid API hook should have failed"),
-        Err(e) => println!("⚠ Unexpected error for invalid API: {:?}", e),
+        Err(e) => println!("⚠ Unexpected error for invalid API: {e:?}"),
     }
 
     // Cleanup
@@ -462,15 +462,12 @@ fn test_performance_stability() -> Result<()> {
     }
 
     let elapsed = start_time.elapsed();
-    println!("1000 calls completed in {:?}", elapsed);
+    println!("1000 calls completed in {elapsed:?}");
 
     unsafe {
         let msgbox_count = ptr::addr_of!(MESSAGEBOX_HOOK_COUNT).read();
         let tick_count = ptr::addr_of!(GETTICKCOUNT_HOOK_COUNT).read();
-        println!(
-            "Final hook counts: MessageBox={}, GetTickCount={}",
-            msgbox_count, tick_count
-        );
+        println!("Final hook counts: MessageBox={msgbox_count}, GetTickCount={tick_count}");
     }
 
     disable_hook(ALL_HOOKS)?;
@@ -549,9 +546,9 @@ fn main() -> Result<()> {
 
     // Enhanced Testing Phases
     let separator = "=".repeat(50);
-    println!("\n{}", separator);
+    println!("\n{separator}");
     println!("ENHANCED TESTING PHASE");
-    println!("{}", separator);
+    println!("{separator}");
 
     // Run all enhanced tests
     test_multiple_hooks()?;
@@ -567,9 +564,9 @@ fn main() -> Result<()> {
     println!("Cleanup completed");
 
     let separator = "=".repeat(50);
-    println!("\n{}", separator);
+    println!("\n{separator}");
     println!("ENHANCED DEMO COMPLETED SUCCESSFULLY!");
-    println!("{}", separator);
+    println!("{separator}");
     println!("\nSummary of tests performed:");
     println!("✓ Basic hook functionality");
     println!("✓ Multiple simultaneous hooks");
@@ -584,8 +581,8 @@ fn main() -> Result<()> {
         let total_messagebox_calls = ptr::addr_of!(MESSAGEBOX_HOOK_COUNT).read();
         let total_gettickcount_calls = ptr::addr_of!(GETTICKCOUNT_HOOK_COUNT).read();
         println!("\nTotal intercepted calls:");
-        println!("- MessageBoxA: {} calls", total_messagebox_calls);
-        println!("- GetTickCount: {} calls", total_gettickcount_calls);
+        println!("- MessageBoxA: {total_messagebox_calls} calls");
+        println!("- GetTickCount: {total_gettickcount_calls} calls");
     }
 
     Ok(())

@@ -51,8 +51,8 @@ unsafe extern "system" fn hooked_messagebox_w(
 
     if is_exit_dialog {
         println!("[HOOK] Intercepted exit confirmation dialog");
-        println!("Original Caption: {}", original_caption);
-        println!("Original Text: {}", original_text);
+        println!("Original Caption: {original_caption}");
+        println!("Original Text: {original_text}");
 
         // Create our custom message
         let custom_text = utf8_to_wide(
@@ -126,7 +126,7 @@ unsafe fn install_hook() -> bool {
 
         // Initialize MinHook
         if let Err(e) = initialize() {
-            println!("[HOOK] Failed to initialize MinHook: {:?}", e);
+            println!("[HOOK] Failed to initialize MinHook: {e:?}");
             return false;
         }
 
@@ -147,13 +147,13 @@ unsafe fn install_hook() -> bool {
                         true
                     }
                     Err(e) => {
-                        println!("[HOOK] Failed to enable hook: {:?}", e);
+                        println!("[HOOK] Failed to enable hook: {e:?}");
                         false
                     }
                 }
             }
             Err(e) => {
-                println!("[HOOK] Failed to create hook: {:?}", e);
+                println!("[HOOK] Failed to create hook: {e:?}");
                 false
             }
         }
@@ -170,7 +170,7 @@ unsafe fn uninstall_hook() {
         println!("[NOTEPAD HOOK] Uninstalling MessageBoxW hook...");
 
         if let Err(e) = uninitialize() {
-            println!("[NOTEPAD HOOK] Failed to uninitialize MinHook: {:?}", e);
+            println!("[NOTEPAD HOOK] Failed to uninitialize MinHook: {e:?}");
         } else {
             println!("[NOTEPAD HOOK] Hook uninstalled successfully!");
         }

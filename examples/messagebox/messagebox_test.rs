@@ -23,7 +23,7 @@ fn show_messagebox(title: &str, message: &str, icon: u32) {
     let title_c = CString::new(title).unwrap();
     let message_c = CString::new(message).unwrap();
 
-    println!("Showing MessageBox: {} - {}", title, message);
+    println!("Showing MessageBox: {title} - {message}");
 
     unsafe {
         MessageBoxA(
