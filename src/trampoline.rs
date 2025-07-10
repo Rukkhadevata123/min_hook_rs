@@ -5,11 +5,10 @@ use crate::disasm::decode_instruction;
 use crate::error::{HookError, Result};
 use crate::instruction::*;
 use std::ffi::c_void;
-use std::mem;
 use std::ptr;
 
 /// Maximum size of a trampoline function
-const TRAMPOLINE_MAX_SIZE: usize = MEMORY_SLOT_SIZE - mem::size_of::<JmpAbs>();
+const TRAMPOLINE_MAX_SIZE: usize = MEMORY_SLOT_SIZE - size_of::<JmpAbs>();
 
 /// Create a trampoline function
 pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
@@ -43,16 +42,16 @@ pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
         let mut temp_buffer = [0u8; 16];
 
         // Check if we have enough space for the hook
-        if old_pos >= mem::size_of::<JmpRel>() as u8 {
+        if old_pos >= size_of::<JmpRel>() as u8 {
             // Complete the function with jump to remaining target
             let jmp = JmpAbs::new(old_inst as u64);
             let jmp_bytes = unsafe {
-                std::slice::from_raw_parts(&jmp as *const _ as *const u8, mem::size_of::<JmpAbs>())
+                std::slice::from_raw_parts(&jmp as *const _ as *const u8, size_of::<JmpAbs>())
             };
             unsafe {
                 ptr::copy_nonoverlapping(jmp_bytes.as_ptr(), new_inst, jmp_bytes.len());
             }
-            copy_size = mem::size_of::<JmpAbs>() as u8;
+            copy_size = size_of::<JmpAbs>() as u8;
             finished = true;
         } else if hs.is_rip_relative() {
             // Handle RIP-relative addressing
@@ -86,15 +85,12 @@ pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
             let dest = old_inst as u64 + hs.len as u64 + hs.immediate as u64;
             let call = CallAbs::new(dest);
             let call_bytes = unsafe {
-                std::slice::from_raw_parts(
-                    &call as *const _ as *const u8,
-                    mem::size_of::<CallAbs>(),
-                )
+                std::slice::from_raw_parts(&call as *const _ as *const u8, size_of::<CallAbs>())
             };
             unsafe {
                 ptr::copy_nonoverlapping(call_bytes.as_ptr(), new_inst, call_bytes.len());
             }
-            copy_size = mem::size_of::<CallAbs>() as u8;
+            copy_size = size_of::<CallAbs>() as u8;
         } else if hs.opcode == 0xE9 || hs.opcode == 0xEB {
             // Direct relative JMP
             let dest = if hs.opcode == 0xEB {
@@ -105,7 +101,7 @@ pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
 
             // Check if it's an internal jump
             let target_start = ct.target as u64;
-            let target_end = target_start + mem::size_of::<JmpRel>() as u64;
+            let target_end = target_start + size_of::<JmpRel>() as u64;
 
             if dest >= target_start && dest < target_end {
                 // Internal jump - copy as-is and update jump destination
@@ -119,15 +115,12 @@ pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
                 // External jump - use absolute jump
                 let jmp = JmpAbs::new(dest);
                 let jmp_bytes = unsafe {
-                    std::slice::from_raw_parts(
-                        &jmp as *const _ as *const u8,
-                        mem::size_of::<JmpAbs>(),
-                    )
+                    std::slice::from_raw_parts(&jmp as *const _ as *const u8, size_of::<JmpAbs>())
                 };
                 unsafe {
                     ptr::copy_nonoverlapping(jmp_bytes.as_ptr(), new_inst, jmp_bytes.len());
                 }
-                copy_size = mem::size_of::<JmpAbs>() as u8;
+                copy_size = size_of::<JmpAbs>() as u8;
                 finished = old_inst as usize >= jmp_dest;
             }
         } else if hs.is_conditional_jump() {
@@ -139,7 +132,7 @@ pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
             };
 
             let target_start = ct.target as u64;
-            let target_end = target_start + mem::size_of::<JmpRel>() as u64;
+            let target_end = target_start + size_of::<JmpRel>() as u64;
 
             if dest >= target_start && dest < target_end {
                 // Internal conditional jump
@@ -164,15 +157,12 @@ pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
 
                 let jcc = JccAbs::new(condition ^ 1, dest); // Invert condition
                 let jcc_bytes = unsafe {
-                    std::slice::from_raw_parts(
-                        &jcc as *const _ as *const u8,
-                        mem::size_of::<JccAbs>(),
-                    )
+                    std::slice::from_raw_parts(&jcc as *const _ as *const u8, size_of::<JccAbs>())
                 };
                 unsafe {
                     ptr::copy_nonoverlapping(jcc_bytes.as_ptr(), new_inst, jcc_bytes.len());
                 }
-                copy_size = mem::size_of::<JccAbs>() as u8;
+                copy_size = size_of::<JccAbs>() as u8;
             }
         } else if hs.opcode == 0xC2 || hs.opcode == 0xC3 {
             // RET instruction - complete if not in branch
@@ -214,28 +204,28 @@ pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
     }
 
     // Check if we have enough space for the hook
-    if (old_pos as usize) < mem::size_of::<JmpRel>() {
-        let padding_size = mem::size_of::<JmpRel>() - old_pos as usize;
+    if (old_pos as usize) < size_of::<JmpRel>() {
+        let padding_size = size_of::<JmpRel>() - old_pos as usize;
         let padding_start = (ct.target as usize + old_pos as usize) as *const u8;
 
         // Check if there's padding after the function
         if !is_code_padding(padding_start, padding_size) {
             // Check for short jump space
-            if (old_pos as usize) < mem::size_of::<JmpRelShort>() {
-                let short_padding_size = mem::size_of::<JmpRelShort>() - old_pos as usize;
+            if (old_pos as usize) < size_of::<JmpRelShort>() {
+                let short_padding_size = size_of::<JmpRelShort>() - old_pos as usize;
                 if !is_code_padding(padding_start, short_padding_size) {
                     return Err(HookError::UnsupportedFunction);
                 }
             }
 
             // Try to use hot patch area above the function
-            let hot_patch_addr = (ct.target as usize - mem::size_of::<JmpRel>()) as *mut c_void;
+            let hot_patch_addr = (ct.target as usize - size_of::<JmpRel>()) as *mut c_void;
             if !is_executable_address(hot_patch_addr) {
                 return Err(HookError::UnsupportedFunction);
             }
 
-            let hot_patch_bytes = (ct.target as usize - mem::size_of::<JmpRel>()) as *const u8;
-            if !is_code_padding(hot_patch_bytes, mem::size_of::<JmpRel>()) {
+            let hot_patch_bytes = (ct.target as usize - size_of::<JmpRel>()) as *const u8;
+            if !is_code_padding(hot_patch_bytes, size_of::<JmpRel>()) {
                 return Err(HookError::UnsupportedFunction);
             }
 
@@ -249,7 +239,7 @@ pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
 
     unsafe {
         let jmp_bytes =
-            std::slice::from_raw_parts(&jmp as *const _ as *const u8, mem::size_of::<JmpAbs>());
+            std::slice::from_raw_parts(&jmp as *const _ as *const u8, size_of::<JmpAbs>());
         ptr::copy_nonoverlapping(jmp_bytes.as_ptr(), ct.relay as *mut u8, jmp_bytes.len());
     }
 

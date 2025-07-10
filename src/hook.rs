@@ -15,7 +15,6 @@ use crate::error::{HookError, Result};
 use crate::instruction::*;
 use crate::trampoline::create_trampoline;
 use std::ffi::c_void;
-use std::mem;
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
 use windows_sys::Win32::Foundation::*;
@@ -185,7 +184,7 @@ impl HookManager {
 
     /// Finds the original instruction pointer for a thread, used when disabling a hook.
     fn find_old_ip(&self, hook: &HookEntry, ip: usize) -> usize {
-        if hook.patch_above && ip == (hook.target as usize - mem::size_of::<JmpRel>()) {
+        if hook.patch_above && ip == (hook.target as usize - size_of::<JmpRel>()) {
             return hook.target as usize;
         }
         for i in 0..hook.n_ip as usize {
@@ -256,7 +255,7 @@ impl HookManager {
                 return false;
             }
             let mut te = THREADENTRY32 {
-                dwSize: mem::size_of::<THREADENTRY32>() as u32,
+                dwSize: size_of::<THREADENTRY32>() as u32,
                 cntUsage: 0,
                 th32ThreadID: 0,
                 th32OwnerProcessID: 0,
@@ -289,7 +288,7 @@ impl HookManager {
                         threads.items.push(te.th32ThreadID);
                         threads.size += 1;
                     }
-                    te.dwSize = mem::size_of::<THREADENTRY32>() as u32;
+                    te.dwSize = size_of::<THREADENTRY32>() as u32;
                     if Thread32Next(snapshot, &mut te) == 0 {
                         break;
                     }
@@ -357,12 +356,12 @@ impl HookManager {
         let hook = &mut self.hooks.items[pos];
         let mut old_protect = 0u32;
         let patch_size = if hook.patch_above {
-            mem::size_of::<JmpRel>() + mem::size_of::<JmpRelShort>()
+            size_of::<JmpRel>() + size_of::<JmpRelShort>()
         } else {
-            mem::size_of::<JmpRel>()
+            size_of::<JmpRel>()
         };
         let patch_target = if hook.patch_above {
-            unsafe { (hook.target as *mut u8).sub(mem::size_of::<JmpRel>()) }
+            unsafe { (hook.target as *mut u8).sub(size_of::<JmpRel>()) }
         } else {
             hook.target as *mut u8
         };
@@ -378,37 +377,32 @@ impl HookManager {
             }
             if enable {
                 let jmp = JmpRel::new_jmp(
-                    (hook.detour as isize
-                        - (patch_target as isize + mem::size_of::<JmpRel>() as isize))
+                    (hook.detour as isize - (patch_target as isize + size_of::<JmpRel>() as isize))
                         as i32,
                 );
                 ptr::copy_nonoverlapping(
                     &jmp as *const JmpRel as *const u8,
                     patch_target,
-                    mem::size_of::<JmpRel>(),
+                    size_of::<JmpRel>(),
                 );
                 if hook.patch_above {
                     let short_jmp = JmpRelShort::new(
-                        -(mem::size_of::<JmpRelShort>() as i8 + mem::size_of::<JmpRel>() as i8),
+                        -(size_of::<JmpRelShort>() as i8 + size_of::<JmpRel>() as i8),
                     );
                     ptr::copy_nonoverlapping(
                         &short_jmp as *const JmpRelShort as *const u8,
                         hook.target as *mut u8,
-                        mem::size_of::<JmpRelShort>(),
+                        size_of::<JmpRelShort>(),
                     );
                 }
             } else if hook.patch_above {
                 ptr::copy_nonoverlapping(
                     hook.backup.as_ptr(),
                     patch_target,
-                    mem::size_of::<JmpRel>() + mem::size_of::<JmpRelShort>(),
+                    size_of::<JmpRel>() + size_of::<JmpRelShort>(),
                 );
             } else {
-                ptr::copy_nonoverlapping(
-                    hook.backup.as_ptr(),
-                    patch_target,
-                    mem::size_of::<JmpRel>(),
-                );
+                ptr::copy_nonoverlapping(hook.backup.as_ptr(), patch_target, size_of::<JmpRel>());
             }
             VirtualProtect(
                 patch_target as *mut c_void,
@@ -591,15 +585,15 @@ impl HookManager {
         unsafe {
             if trampoline.patch_above {
                 ptr::copy_nonoverlapping(
-                    (target as *const u8).sub(mem::size_of::<JmpRel>()),
+                    (target as *const u8).sub(size_of::<JmpRel>()),
                     hook_entry.backup.as_mut_ptr(),
-                    mem::size_of::<JmpRel>() + mem::size_of::<JmpRelShort>(),
+                    size_of::<JmpRel>() + size_of::<JmpRelShort>(),
                 );
             } else {
                 ptr::copy_nonoverlapping(
                     target as *const u8,
                     hook_entry.backup.as_mut_ptr(),
-                    mem::size_of::<JmpRel>(),
+                    size_of::<JmpRel>(),
                 );
             }
         }

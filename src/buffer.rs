@@ -154,8 +154,7 @@ impl BufferManager {
 
             if !block.is_null() {
                 // Build a linked list of all the slots
-                let mut slot =
-                    (block as *mut u8).add(std::mem::size_of::<MemoryBlock>()) as *mut MemorySlot;
+                let mut slot = (block as *mut u8).add(size_of::<MemoryBlock>()) as *mut MemorySlot;
                 (*block).free = ptr::null_mut();
                 (*block).used_count = 0;
 
@@ -293,7 +292,7 @@ fn find_prev_free_region(
             if VirtualQuery(
                 try_addr as *const c_void,
                 &mut mbi,
-                std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+                size_of::<MEMORY_BASIC_INFORMATION>(),
             ) == 0
             {
                 break;
@@ -334,7 +333,7 @@ fn find_next_free_region(
             if VirtualQuery(
                 try_addr as *const c_void,
                 &mut mbi,
-                std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+                size_of::<MEMORY_BASIC_INFORMATION>(),
             ) == 0
             {
                 break;
@@ -374,11 +373,7 @@ pub fn is_executable_address(address: *mut c_void) -> bool {
 
     unsafe {
         let mut mi = std::mem::zeroed::<MEMORY_BASIC_INFORMATION>();
-        VirtualQuery(
-            address,
-            &mut mi,
-            std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
-        );
+        VirtualQuery(address, &mut mi, size_of::<MEMORY_BASIC_INFORMATION>());
 
         mi.State == MEM_COMMIT && (mi.Protect & PAGE_EXECUTE_FLAGS) != 0
     }
