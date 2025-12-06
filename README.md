@@ -11,7 +11,7 @@ A Rust implementation of the MinHook library for Windows x64 function hooking.
 ```toml
 [dependencies]
 min_hook_rs = "2.1"
-windows-sys = { version = "0.60", features = [
+windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging", 
     "Win32_Foundation"
 ] }
