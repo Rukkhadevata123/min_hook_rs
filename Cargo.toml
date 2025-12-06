@@ -1,10 +1,10 @@
 [package]
 name = "min_hook_rs"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2024"
 license = "MIT"
-authors = ["Rukkhadevata123 <3083913301@qq.com>"]
-description = "A Rust implementation of MinHook library for Windows x64 function hooking with enhanced precision instruction decoding"
+authors = ["Rukkhadevata123 <rukkhadevata@foxmail.com>"]
+description = "A Rust implementation of MinHook library for Windows x64 function hooking with simplified but reliable instruction decoding"
 documentation = "https://docs.rs/min_hook_rs"
 homepage = "https://github.com/Rukkhadevata123/min_hook_rs"
 repository = "https://github.com/Rukkhadevata123/min_hook_rs"
@@ -29,7 +29,7 @@ default-target = "x86_64-pc-windows-msvc"
 targets = ["x86_64-pc-windows-msvc"]
 
 [dependencies.windows-sys]
-version = "0.60"
+version = "0.61"
 features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
