@@ -440,10 +440,11 @@ impl HookManager {
             let mut result = Ok(());
             for i in first..self.hooks.size {
                 if self.hooks.items[i].is_enabled != enable
-                    && let Err(e) = self.enable_hook_ll(i, enable) {
-                        result = Err(e);
-                        break;
-                    }
+                    && let Err(e) = self.enable_hook_ll(i, enable)
+                {
+                    result = Err(e);
+                    break;
+                }
             }
             self.unfreeze(&threads);
             result
@@ -520,10 +521,11 @@ impl HookManager {
             for i in first..self.hooks.size {
                 let hook = &self.hooks.items[i];
                 if hook.is_enabled != hook.queue_enable
-                    && let Err(e) = self.enable_hook_ll(i, hook.queue_enable) {
-                        result = Err(e);
-                        break;
-                    }
+                    && let Err(e) = self.enable_hook_ll(i, hook.queue_enable)
+                {
+                    result = Err(e);
+                    break;
+                }
             }
             self.unfreeze(&threads);
             result

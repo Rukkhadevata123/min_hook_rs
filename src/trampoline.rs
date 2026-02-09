@@ -60,7 +60,9 @@ pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
             }
 
             // Calculate new displacement
-            let old_target = old_inst as u64 + hs.len as u64 + hs.displacement as u64;
+            let old_target = (old_inst as u64)
+                .wrapping_add(hs.len as u64)
+                .wrapping_add(hs.displacement as u64);
             let new_disp = old_target as i64 - (new_inst as u64 + hs.len as u64) as i64;
 
             // Update displacement in instruction
@@ -82,7 +84,9 @@ pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
             }
         } else if hs.opcode == 0xE8 {
             // Direct relative CALL
-            let dest = old_inst as u64 + hs.len as u64 + hs.immediate as u64;
+            let dest = (old_inst as u64)
+                .wrapping_add(hs.len as u64)
+                .wrapping_add(hs.immediate as u64);
             let call = CallAbs::new(dest);
             let call_bytes = unsafe {
                 std::slice::from_raw_parts(&call as *const _ as *const u8, size_of::<CallAbs>())
@@ -94,9 +98,13 @@ pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
         } else if hs.opcode == 0xE9 || hs.opcode == 0xEB {
             // Direct relative JMP
             let dest = if hs.opcode == 0xEB {
-                old_inst as u64 + hs.len as u64 + hs.immediate as i8 as i64 as u64
+                (old_inst as u64)
+                    .wrapping_add(hs.len as u64)
+                    .wrapping_add(hs.immediate as i8 as i64 as u64)
             } else {
-                old_inst as u64 + hs.len as u64 + hs.immediate as u64
+                (old_inst as u64)
+                    .wrapping_add(hs.len as u64)
+                    .wrapping_add(hs.immediate as u64)
             };
 
             // Check if it's an internal jump
@@ -126,9 +134,13 @@ pub fn create_trampoline(ct: &mut Trampoline) -> Result<()> {
         } else if hs.is_conditional_jump() {
             // Conditional jumps
             let dest = if hs.opcode == 0x0F {
-                old_inst as u64 + hs.len as u64 + hs.immediate as u64
+                (old_inst as u64)
+                    .wrapping_add(hs.len as u64)
+                    .wrapping_add(hs.immediate as u64)
             } else {
-                old_inst as u64 + hs.len as u64 + hs.immediate as i8 as i64 as u64
+                (old_inst as u64)
+                    .wrapping_add(hs.len as u64)
+                    .wrapping_add(hs.immediate as i8 as i64 as u64)
             };
 
             let target_start = ct.target as u64;
